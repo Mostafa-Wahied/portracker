@@ -31,7 +31,7 @@ By auto-discovering services on your systems, portracker provides a live, accura
 *   **Enhanced TrueNAS Discovery**: Providing an optional TrueNAS API key allows `portracker` to discover running VMs* and gather enhanced system information like the OS version and uptime.
 *   **Modern & Responsive UI**: A clean dashboard with light/dark modes, live filtering, and multiple data layout views (list, grid, table).
 
-<sub>*Note: VMs discovered on TrueNAS with the optional API key are shown in read-only mode. To enable full monitoring, deploy a Portracker instance on each VM and add it as a separate server.*</sub>
+<sub>\**Note: VMs discovered on TrueNAS with the optional API key are shown in read-only mode. To enable full monitoring, deploy a Portracker instance on each VM and add it as a separate server.*</sub>
 
 ## Deployment
 
