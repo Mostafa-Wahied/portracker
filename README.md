@@ -56,8 +56,6 @@ services:
       - ./portracker-data:/data
       # Required for discovering services running in Docker
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Required ONLY if running on a TrueNAS host
-      # - /run/middleware/middlewared.sock:/var/run/middlewared.sock:ro
     environment:
       - DATABASE_PATH=/data/portracker.db
       - PORT=4999
@@ -82,7 +80,6 @@ docker run -d \
   --network host \
   -v ./portracker-data:/data \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  # -v /run/middleware/middlewared.sock:/var/run/middlewared.sock:ro \ # Add this line ONLY for TrueNAS servers
   -e DATABASE_PATH=/data/portracker.db \
   -e PORT=4999 \
   mostafawahied/portracker:latest

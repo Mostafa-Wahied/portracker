@@ -296,12 +296,25 @@ class DockerCollector extends BaseCollector {
       const allPorts = [];
       const dockerPortsMap = new Map();
       const dockerProcessMap = new Map();
+      const containerCreationTimeMap = new Map(); // Add this
 
       try {
+        // Get container creation times
+        const dockerContainers = await this.getApplications();
+        dockerContainers.forEach((container) => {
+          if (container.created) {
+            containerCreationTimeMap.set(container.id, container.created);
+          }
+        });
+
         const dockerPorts = await this._getDockerContainerPorts();
         dockerPorts.forEach((port) => {
           const key = `${port.host_ip}:${port.host_port}`;
           if (!dockerPortsMap.has(key)) {
+            // Add created timestamp from container
+            if (port.container_id) {
+              port.created = containerCreationTimeMap.get(port.container_id) || null;
+            }
             dockerPortsMap.set(key, port);
             allPorts.push(port);
           }
@@ -316,10 +329,7 @@ class DockerCollector extends BaseCollector {
           }
         });
       } catch (dockerErr) {
-        this.logWarn(
-          "Failed to collect Docker container-specific data:",
-          dockerErr.message
-        );
+        this.logWarn("Failed to collect Docker container-specific data:", dockerErr.message);
       }
 
       try {
@@ -342,6 +352,8 @@ class DockerCollector extends BaseCollector {
                   containerId: container.id,
                   target: `${container.id.substring(0, 12)}:internal(host-net)`,
                 };
+                // Add created timestamp for host-networked containers
+                port.created = containerCreationTimeMap.get(container.id) || null;
                 break;
               }
             }
@@ -349,6 +361,9 @@ class DockerCollector extends BaseCollector {
 
           if (!dockerInfo) {
             dockerInfo = await this._checkIfPortBelongsToDocker(port);
+            if (dockerInfo && dockerInfo.containerId) {
+              port.created = containerCreationTimeMap.get(dockerInfo.containerId) || null;
+            }
           }
 
           if (dockerInfo) {
@@ -370,10 +385,7 @@ class DockerCollector extends BaseCollector {
           }
         }
       } catch (systemErr) {
-        this.logWarn(
-          "Failed to collect and process system ports:",
-          systemErr.message
-        );
+        this.logWarn("Failed to collect and process system ports:", systemErr.message);
       }
 
       this.logInfo(`Total unique ports collected: ${allPorts.length}`);

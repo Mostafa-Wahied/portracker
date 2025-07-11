@@ -89,9 +89,9 @@ class TrueNASCollector extends BaseCollector {
     try {
       const { stdout: kernelInfo } = await execAsync("uname -a");
       if (kernelInfo.toLowerCase().includes("truenas")) {
-        score += 40;
+        score += 60;
         reasons.push("TrueNAS kernel signature found");
-        this.log("✓ Found TrueNAS kernel signature (+40)");
+        this.log("✓ Found TrueNAS kernel signature (+60)");
       }
     } catch (err) {
       this.logWarn(
@@ -104,9 +104,9 @@ class TrueNASCollector extends BaseCollector {
         'cat /etc/os-release 2>/dev/null || echo ""'
       );
       if (osRelease.toLowerCase().includes("truenas")) {
-        score += 30;
+        score += 40;
         reasons.push("TrueNAS OS release identifier found");
-        this.log("✓ Found TrueNAS in OS release (+30)");
+        this.log("✓ Found TrueNAS in OS release (+40)");
       }
     } catch (err) {
       this.logWarn(
@@ -123,10 +123,10 @@ class TrueNASCollector extends BaseCollector {
       try {
         const exists = fs.existsSync(socketPath);
         if (exists) {
-          score += 20;
-          reasons.push(`TrueNAS middleware socket found at ${socketPath}`);
-          this.log(`✓ Found TrueNAS middleware socket at ${socketPath} (+20)`);
-          break;
+          score += 10;
+          reasons.push(`Found middleware socket at ${socketPath}`);
+          this.log(`✓ Found middleware socket at ${socketPath} (+10)`);
+          break; 
         }
       } catch (err) {
         this.logWarn(`Error checking socket at ${socketPath}:`, err.message);
@@ -155,9 +155,9 @@ class TrueNASCollector extends BaseCollector {
       (serverConfig && serverConfig.truenas_api_key) ||
       process.env.TRUENAS_API_KEY
     ) {
-      score += 40;
+      score += 20;
       reasons.push("TrueNAS API key provided");
-      this.log("✓ Found TrueNAS API key (+40)");
+      this.log("✓ Found TrueNAS API key (+20)");
     }
 
     this.detectionReasons = reasons;
