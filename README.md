@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshots\main-light.png" alt="portracker Dashboard Screenshot" style="width: 90%;" />
+  <img src="https://i.postimg.cc/vHcsH0TY/main-light.png" alt="portracker Dashboard Screenshot" style="width: 95%;" />
 </p>
 
 By auto-discovering services on your systems, portracker provides a live, accurate map of your network. It helps eliminate manual tracking in spreadsheets and prevents deployment failures caused by port conflicts.
