@@ -33,6 +33,11 @@ const renderHighlightedText = (content) => {
   );
 };
 
+/**
+ * Displays detailed information and interactive actions for a network port, with optional search term highlighting.
+ *
+ * Renders a styled UI card showing port status, clickable port number, internal port details, owner, notes, source, creation date, and host information. Provides actions for copying, editing notes, and toggling ignore state, with dynamic highlighting of search matches.
+ */
 export function PortGridItem({
   port,
   serverId,

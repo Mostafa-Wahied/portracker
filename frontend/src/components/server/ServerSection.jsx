@@ -34,6 +34,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+/**
+ * Renders a comprehensive server overview section, including system information, virtual machines, and port management with sorting, filtering, and multiple layout options.
+ *
+ * Displays server status, host details, and provides interactive controls for sorting and viewing ports in list, grid, card, or table formats. Allows toggling between expanded and collapsed views, managing hidden ports, and switching layouts for system info and VMs. Handles user actions such as copying, editing notes, and toggling port visibility.
+ */
 function ServerSectionComponent({
   server,
   ok,

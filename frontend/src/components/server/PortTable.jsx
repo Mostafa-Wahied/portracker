@@ -1,6 +1,11 @@
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { PortTableRow } from "./PortTableRow";
 
+/**
+ * Renders a sortable table displaying a list of ports with associated details and actions.
+ *
+ * Displays columns for status, port, service, source, host, creation time, and available actions. Allows sorting by port, service, or creation time. Each row represents a port and provides controls for copying, adding notes, or toggling ignore status.
+ */
 export function PortTable({
   ports,
   serverId,

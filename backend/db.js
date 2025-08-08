@@ -189,9 +189,13 @@ if (!tableExists) {
 }
 
 /**
- * Ensures a local server entry exists in the database and its URL/platform_type are appropriate.
- * @param {number} [port=3000] - The port to use in the local server URL.
- * @param {boolean} [appDebugEnabled=false] - Whether application-level debug is enabled.
+ * Ensures that a local server record with the correct URL, type, and platform_type exists in the database.
+ * 
+ * If the local server entry does not exist, it is created with the specified port and default platform type. If it exists but its URL, type, or platform_type are incorrect, the entry is updated accordingly.
+ * 
+ * @param {number} [port=3000] - The port to use for the local server's URL.
+ * @param {boolean} [appDebugEnabled=false] - Enables debug logging if set to true.
+ * @returns {boolean} True if the local server entry exists or was successfully created/updated; false if an error occurred or the schema is incomplete.
  */
 function ensureLocalServer(port = 3000, appDebugEnabled = false) {
   try {
@@ -271,9 +275,9 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
 }
 
 /**
- * Updates the platform_type for the local server.
- * @param {string} platformType The new platform type (e.g., 'docker', 'truenas', 'system').
- * @param {boolean} [appDebugEnabled=false] - Whether application-level debug is enabled.
+ * Updates the `platform_type` field of the local server record in the database.
+ * @param {string} platformType - The new platform type to set for the local server (e.g., 'docker', 'truenas', 'system').
+ * @param {boolean} [appDebugEnabled=false] - Enables additional debug logging if true.
  */
 function updateLocalServerPlatformType(platformType, appDebugEnabled = false) {
   try {
