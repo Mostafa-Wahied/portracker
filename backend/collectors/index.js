@@ -30,9 +30,12 @@ function createCollector(platform = "base", config = {}) {
 }
 
 /**
- * Auto-detect the best collector for the current system
- * @param {Object} config Configuration options
- * @returns {Promise<BaseCollector>} The best collector for this system
+ * Asynchronously selects and returns the most compatible collector for the current system.
+ * 
+ * Evaluates available collector types by their compatibility scores and returns the collector with the highest positive score. If no compatible collector is found, returns a system collector as a fallback.
+ * 
+ * @param {Object} config - Optional configuration settings, such as debug mode.
+ * @returns {Promise<BaseCollector>} A promise that resolves to the most suitable collector instance for the system.
  */
 async function detectCollector(config = {}) {
   const debug = config.debug || false;
