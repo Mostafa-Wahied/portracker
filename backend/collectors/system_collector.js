@@ -11,6 +11,7 @@ const { exec } = require("child_process");
 const util = require("util");
 const os = require("os");
 const execAsync = util.promisify(exec);
+const ProcParser = require("../lib/proc-parser");
 
 class SystemCollector extends BaseCollector {
   /**
@@ -23,6 +24,7 @@ class SystemCollector extends BaseCollector {
     this.platformName = "Local System";
     this.name = "System Collector";
     this.isWindows = os.platform() === "win32";
+    this.procParser = new ProcParser();
   }
 
   /**
@@ -146,6 +148,49 @@ class SystemCollector extends BaseCollector {
   async getPorts() {
     try {
       this.log("Collecting system ports");
+      
+      // First try to use /proc parsing if available with effectiveness test
+      if (!this.isWindows && this.procParser) {
+        try {
+          this.log("Testing /proc filesystem access effectiveness...");
+          const procWorks = await this.procParser.testProcAccess();
+          
+          if (procWorks) {
+            this.log("Attempting to get ports via /proc filesystem");
+            const tcpPorts = await this.procParser.getTcpPorts();
+            
+            // Use proper UDP filtering logic - include important UDP ports even when INCLUDE_UDP=false
+            const includeAllUdp = process.env.INCLUDE_UDP === 'true';
+            const udpPorts = await this.procParser.getUdpPorts(includeAllUdp);
+            
+            const allPorts = [...tcpPorts, ...udpPorts];
+            
+            if (allPorts.length >= 3) {
+              this.log(`Successfully collected ${allPorts.length} ports via /proc (TCP: ${tcpPorts.length}, UDP: ${udpPorts.length})`);
+              return allPorts.map(port => this.normalizePortEntry({
+                source: "system",
+                owner: port.owner,
+                protocol: port.protocol,
+                host_ip: port.host_ip,
+                host_port: port.host_port,
+                pid: port.pid,
+                platform_data: {
+                  process: port.owner,
+                  pid: port.pid,
+                },
+              }));
+            } else {
+              this.logWarn(`/proc parsing returned only ${allPorts.length} ports, falling back to commands`);
+            }
+          } else {
+            this.logWarn("/proc access test failed, falling back to commands");
+          }
+        } catch (procErr) {
+          this.logWarn("Failed to get ports via /proc, falling back to commands:", procErr.message);
+        }
+      }
+      
+      // Fallback to existing command-based approach
       if (this.isWindows) {
         return await this.getWindowsPorts();
       } else {

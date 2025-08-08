@@ -2,31 +2,44 @@ version: '3.8'
 
 services:
   portracker:
+    build: .
     image: portracker:latest
     container_name: portracker
     restart: unless-stopped
-    network_mode: "host"
+    # network_mode: "host"
+    pid: "host"  # Access host PID namespace
+    
+    cap_add:
+      - SYS_PTRACE  # For process inspection
+      - SYS_ADMIN   # For nsenter if needed
     
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /run/middleware/middlewared.sock:/var/run/middlewared.sock:ro  # For TrueNAS
       - ./portracker-data:/data
+      - /proc:/host/proc:ro  # Mount host /proc
+      - /sys:/host/sys:ro    # Mount host /sys filesystem (optional but helpful)
+    
+    ports:
+      - "${HOST_PORT:-4999}:4999"
     
     environment:
       # CORE CONFIGURATION
       - DATABASE_PATH=/data/portracker.db
       - PORT=4999
+      - NODE_ENV=production
+      - DATA_DIR=/data
+      - HOST_PROC=/host/proc  # Tell the app where to find host /proc
       
       # TRUENAS INTEGRATION (Optional)
-      - TRUENAS_API_KEY=your-api-key-here
+      # - TRUENAS_API_KEY=your-api-key-here
       
       # PERFORMANCE SETTINGS
       - CACHE_TIMEOUT_MS=60000          # Cache duration (60 seconds)
       - DISABLE_CACHE=false             # Set to 'true' to disable caching
-      - INCLUDE_UDP=false               # Set to 'true' to include UDP ports
+      - INCLUDE_UDP=true               # Set to 'true' to include UDP ports
       
       # DEBUGGING
-      - DEBUG=false                     # Set to 'true' for verbose logging
+      - DEBUG=true                     # Set to 'true' for verbose logging
       
     
     healthcheck:

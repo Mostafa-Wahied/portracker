@@ -20,6 +20,7 @@ const execAsync = util.promisify(exec);
 const fs = require("fs");
 const { TrueNASClient } = require("../lib/truenas-rpc");
 const PerformanceTracker = require("../utils/performance-tracker");
+const ProcParser = require("../lib/proc-parser");
 
 class TrueNASCollector extends BaseCollector {
   /**
@@ -32,6 +33,7 @@ class TrueNASCollector extends BaseCollector {
     this.platformName = "TrueNAS";
     this.name = "TrueNAS Collector";
     this.client = new TrueNASClient({ debug: this.debug });
+    this.procParser = new ProcParser();
 
     // Initialize cache system
     this.cache = {
@@ -416,46 +418,76 @@ class TrueNASCollector extends BaseCollector {
       );
       const lines = stdout.trim().split("\n");
       const ports = [];
+      
       for (const line of lines) {
         if (!line.trim()) continue;
         const [name, portsStr, containerId] = line.split("|");
-        if (!portsStr || portsStr === "") continue;
+        
+        if (!portsStr || portsStr === "") {
+          continue;
+        }
+        
         const portMappings = portsStr.split(", ");
         for (const mapping of portMappings) {
-          if (!mapping.includes("->")) continue;
-          const [external, internal] = mapping.split("->");
-          let hostIP = "*";
-          let hostPort;
-          if (external.includes(":")) {
-            const parts = external.split(":");
-            hostIP = this._resolveHostIP(parts[0]);
-            hostPort = parts[1];
+          
+          if (mapping.includes("->")) {
+            const [external, internal] = mapping.split("->");
+
+            let hostIP = "*";
+            let hostPort;
+            if (external.includes(":")) {
+              const parts = external.split(":");
+              hostIP = this._resolveHostIP(parts[0]);
+              hostPort = parts[1];
+            } else {
+              hostPort = external;
+              hostIP = this._getServerIP();
+            }
+            const [containerPort, proto] = internal.split("/");
+
+            if (hostIP.endsWith(".255")) {
+              this.log(
+                `Skipping broadcast address port for ${name}: ${hostIP}:${hostPort}`
+              );
+              continue;
+            }
+
+            ports.push({
+              source: "docker",
+              owner: name,
+              protocol: proto || "tcp",
+              host_ip: hostIP,
+              host_port: parseInt(hostPort, 10),
+              target: containerPort,
+              container_id: containerId,
+              vm_id: null,
+              app_id: containerId,
+            });
+          } else if (mapping.match(/^\d+\/(tcp|udp)$/)) {
+            const [port, protocol] = mapping.split('/');
+            const portNum = parseInt(port, 10);
+            if (!isNaN(portNum)) {
+              ports.push({
+                source: "docker",
+                owner: name,
+                protocol: protocol || "tcp",
+                host_ip: "0.0.0.0",
+                host_port: portNum,
+                target: `${containerId.substring(0, 12)}:${portNum}(internal)`,
+                container_id: containerId,
+                vm_id: null,
+                app_id: containerId,
+                internal: true
+              });
+            }
           } else {
-            hostPort = external;
-            hostIP = this._getServerIP();
+            // Pattern didn't match - this is normal for some Docker port formats
           }
-          const [containerPort, proto] = internal.split("/");
-
-          if (hostIP.endsWith(".255")) {
-            this.log(
-              `Skipping broadcast address port for ${name}: ${hostIP}:${hostPort}`
-            );
-            continue;
-          }
-
-          ports.push({
-            source: "docker",
-            owner: name,
-            protocol: proto || "tcp",
-            host_ip: hostIP,
-            host_port: parseInt(hostPort, 10),
-            target: containerPort,
-            container_id: containerId,
-            vm_id: null,
-            app_id: containerId,
-          });
         }
       }
+      
+      this.log(`Total ports collected: ${ports.length}`);
+      
       return ports;
     } catch (err) {
       this.logError(
@@ -546,70 +578,242 @@ class TrueNASCollector extends BaseCollector {
   }
 
   /**
-   * Get system ports using ss command
+   * Get system ports using platform-adaptive approach
    * @returns {Promise<Array>} List of system ports
    */
   async _getSystemPorts() {
-    try {
-      this.log('Getting system ports via "ss -tulpn"');
-      const { stdout } = await execAsync("ss -tulpn");
-      const lines = stdout.trim().split("\n");
-      const ports = [];
-      const includeUdp = process.env.INCLUDE_UDP === "true";
+    this.logInfo('=== TrueNAS System Ports Collection (Platform-Adaptive) ===');
+    
+    // METHOD 1: Try enhanced /proc parsing first (highest accuracy for containerized environments)
+    if (this.procParser) {
+      try {
+        this.logInfo('Attempting primary method: Enhanced /proc filesystem parsing');
+        const procWorks = await this.procParser.testProcAccess();
+        
+        if (procWorks) {
+          const tcpPorts = await this.procParser.getTcpPorts();
+          const includeUdp = process.env.INCLUDE_UDP === 'true';
+          const udpPorts = await this.procParser.getUdpPorts(includeUdp);
+          
+          const allPorts = [...tcpPorts, ...udpPorts].map(port => ({
+            source: 'system',
+            owner: port.owner,
+            protocol: port.protocol,
+            host_ip: port.host_ip === '*' ? '0.0.0.0' : port.host_ip,
+            host_port: port.host_port,
+            target: null,
+            container_id: null,
+            app_id: null,
+            pids: port.pid ? [port.pid] : []
+          }));
 
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const columns = line.split(/\s+/);
-        if (columns.length < 5) continue;
-        const protocol = columns[0].toLowerCase();
-
-        if (!includeUdp && !protocol.startsWith("tcp")) {
-          continue; // Default behavior: skip non-TCP ports
-        }
-
-        const localAddress = columns[4];
-        const match = localAddress.match(/(.+):(\d+)$/);
-        if (!match) continue;
-
-        let [, address, port] = match;
-        if (address.includes("%")) {
-          address = address.split("%")[0];
-        }
-
-        const processMatch = line.match(/users:\(\("([^"]+)",pid=(\d+),/);
-        const process = processMatch ? processMatch[1] : null;
-        const pid = processMatch ? parseInt(processMatch[2], 10) : null;
-
-        let resolvedHostIP;
-        if (address === "0.0.0.0" || address === "::") {
-          resolvedHostIP = "0.0.0.0";
+          this.logInfo(`Enhanced /proc parsing successful: ${allPorts.length} ports found`);
+          if (allPorts.length > 0) {
+            return allPorts;
+          }
         } else {
-          resolvedHostIP = address;
+          this.logWarn('Enhanced /proc filesystem test failed, trying fallback methods');
         }
-
-        ports.push({
-          source: "system",
-          owner: process || "system",
-          protocol: protocol === "tcp" ? "tcp" : "udp",
-          host_ip: resolvedHostIP,
-          host_port: parseInt(port, 10),
-          target: null,
-          container_id: null,
-          vm_id: null,
-          app_id: null,
-          pid: pid,
-        });
+      } catch (procErr) {
+        this.logWarn('Failed to get ports via enhanced /proc parsing:', procErr.message);
       }
-      return ports;
-    } catch (err) {
-      this.logError(
-        'Error getting system ports via "ss":',
-        err.message,
-        err.stack
-      );
-      return [];
     }
+    
+    // METHOD 2: Try ss command (fallback for non-containerized environments)
+    try {
+      this.logInfo('Attempting secondary method: ss command');
+      const { stdout } = await execAsync('ss -tulpn 2>/dev/null');
+      const ports = this._parseSSOutput(stdout);
+      this.logInfo(`ss command successful: ${ports.length} ports found`);
+      if (ports.length > 0) {
+        return ports;
+      }
+    } catch (ssErr) {
+      this.logWarn(`ss command failed: ${ssErr.message}, trying tertiary methods`);
+    }
+
+    // METHOD 3: Try netstat command
+    try {
+      this.logInfo('Attempting tertiary method: netstat command');
+      const { stdout } = await execAsync('netstat -tulpn 2>/dev/null');
+      const ports = this._parseNetstatOutput(stdout);
+      this.logInfo(`netstat command successful: ${ports.length} ports found`);
+      if (ports.length > 0) {
+        return ports;
+      }
+    } catch (netstatErr) {
+      this.logWarn(`netstat command failed: ${netstatErr.message}, trying final fallback`);
+    }
+
+    // METHOD 4: Try nsenter for host network access (last resort)
+    try {
+      this.logInfo('Attempting fallback method: nsenter for host network access');
+      const { stdout } = await execAsync('nsenter -t 1 -n ss -tulpn 2>/dev/null');
+      if (stdout.trim()) {
+        const ports = this._parseSSOutput(stdout);
+        this.logInfo(`nsenter method successful: ${ports.length} ports found`);
+        return ports;
+      }
+    } catch (nsenterErr) {
+      this.logWarn(`nsenter method failed: ${nsenterErr.message}`);
+    }
+
+    this.logError('All port collection methods failed');
+    return [];
+  }
+
+  /**
+   * Parse ss command output to extract port information
+   * @param {string} output ss command output
+   * @returns {Array} Parsed port entries
+   */
+  _parseSSOutput(output) {
+    const entries = [];
+    const lines = output.split('\n');
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const cols = line.split(/\s+/);
+      if (cols.length < 5) continue;
+
+      // ss output format: Netid State Recv-Q Send-Q Local-Address:Port Peer-Address:Port Process
+      const protocol = cols[0].toLowerCase();
+      if (!protocol.includes('tcp') && !protocol.includes('udp')) continue;
+
+      const state = cols[1];
+      // Only include listening ports
+      if (protocol.includes('tcp') && state !== 'LISTEN') continue;
+      if (protocol.includes('udp') && state !== 'UNCONN') continue;
+
+      const localAddr = cols[4];
+      if (!localAddr || !localAddr.includes(':')) continue;
+
+      let host_ip, portStr;
+      // Handle IPv6 addresses [::]:port and IPv4 addresses ip:port
+      if (localAddr.includes('[') && localAddr.includes(']:')) {
+        const match = localAddr.match(/\[(.+)\]:(\d+)$/);
+        if (!match) continue;
+        host_ip = match[1];
+        portStr = match[2];
+      } else {
+        const lastColon = localAddr.lastIndexOf(':');
+        if (lastColon === -1) continue;
+        host_ip = localAddr.substring(0, lastColon);
+        portStr = localAddr.substring(lastColon + 1);
+      }
+
+      const host_port = parseInt(portStr, 10);
+      if (isNaN(host_port) || host_port <= 0 || host_port > 65535) continue;
+
+      // Extract process information if available
+      let owner = 'unknown';
+      let pid = null;
+      if (cols.length > 6) {
+        const processCol = cols[6];
+        if (processCol && processCol !== '-') {
+          // Format: users:(("process",pid=123,fd=5))
+          const processMatch = processCol.match(/users:\(\("([^"]+)",pid=(\d+)/);
+          if (processMatch) {
+            owner = processMatch[1];
+            pid = parseInt(processMatch[2], 10);
+          }
+        }
+      }
+
+      entries.push({
+        source: 'system',
+        owner,
+        protocol: protocol.includes('tcp') ? 'tcp' : 'udp',
+        host_ip: host_ip === '*' ? '0.0.0.0' : host_ip,
+        host_port,
+        target: null,
+        container_id: null,
+        app_id: null,
+        pids: pid !== null ? [pid] : []
+      });
+    }
+
+    return entries;
+  }
+
+  /**
+   * Parse netstat command output to extract port information
+   * @param {string} output netstat command output
+   * @returns {Array} Parsed port entries
+   */
+  _parseNetstatOutput(output) {
+    const entries = [];
+    const lines = output.split('\n');
+
+    for (let i = 2; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+
+      const cols = line.split(/\s+/);
+      if (cols.length < 4) continue;
+
+      const protocol = cols[0].toLowerCase();
+      if (!protocol.includes('tcp') && !protocol.includes('udp')) return;
+
+      const localAddr = cols[3];
+      if (!localAddr || !localAddr.includes(':')) continue;
+
+      // Only include listening TCP ports or all UDP ports
+      if (protocol.includes('tcp')) {
+        const state = cols[5];
+        if (state !== 'LISTEN') continue;
+      }
+
+      let host_ip, portStr;
+      // Handle IPv6 addresses [::]:port and IPv4 addresses ip:port
+      if (localAddr.includes('[') && localAddr.includes(']:')) {
+        const match = localAddr.match(/\[(.+)\]:(\d+)$/);
+        if (!match) continue;
+        host_ip = match[1];
+        portStr = match[2];
+      } else {
+        const lastColon = localAddr.lastIndexOf(':');
+        if (lastColon === -1) continue;
+        host_ip = localAddr.substring(0, lastColon);
+        portStr = localAddr.substring(lastColon + 1);
+      }
+
+      const host_port = parseInt(portStr, 10);
+      if (isNaN(host_port) || host_port <= 0 || host_port > 65535) continue;
+
+      // Extract process information if available (last column)
+      let owner = 'unknown';
+      let pid = null;
+      if (cols.length > 6) {
+        const processCol = cols[cols.length - 1];
+        if (processCol && processCol !== '-') {
+          const pidMatch = processCol.match(/^(\d+)\//);
+          if (pidMatch) {
+            pid = parseInt(pidMatch[1], 10);
+            const nameMatch = processCol.match(/\/(.+)$/);
+            if (nameMatch) {
+              owner = nameMatch[1];
+            }
+          }
+        }
+      }
+
+      entries.push({
+        source: 'system',
+        owner,
+        protocol: protocol.includes('tcp') ? 'tcp' : 'udp',
+        host_ip: host_ip === '*' ? '0.0.0.0' : host_ip,
+        host_port,
+        target: null,
+        container_id: null,
+        app_id: null,
+        pids: pid !== null ? [pid] : []
+      });
+    }
+
+    return entries;
   }
 
   /**
@@ -700,11 +904,11 @@ class TrueNASCollector extends BaseCollector {
               size: "N/A",
               mounts: "N/A",
               networks: container.networks || "N/A",
-              ports: this._parseDockerPorts(container.ports),
+              ports: [], // Will be populated below with both host-mapped and internal ports
             },
           }))
         );
-        this.logInfo(`Collected ${dockerContainers.length} Docker containers`);
+        this.log(`Collected ${dockerContainers.length} Docker containers`);
       } catch (err) {
         this.logWarn("Docker container collection failed:", err.message);
       }
@@ -716,6 +920,30 @@ class TrueNASCollector extends BaseCollector {
         perf.start("docker-ports-collection");
         const dockerPorts = await this._getDockerPorts();
         perf.end("docker-ports-collection");
+
+        // Group docker ports by container ID for attribution
+        const portsByContainer = new Map();
+        dockerPorts.forEach(port => {
+          if (port.container_id) {
+            if (!portsByContainer.has(port.container_id)) {
+              portsByContainer.set(port.container_id, []);
+            }
+            portsByContainer.get(port.container_id).push({
+              host_ip: port.host_ip,
+              host_port: port.host_port,
+              container_port: parseInt(port.target.toString().split(':')[1]?.split('(')[0] || port.host_port),
+              protocol: port.protocol,
+              internal: port.internal || false
+            });
+          }
+        });
+
+        // Populate platform_data.ports for each application
+        results.applications.forEach(app => {
+          if (app.platform === "docker" && portsByContainer.has(app.id)) {
+            app.platform_data.ports = portsByContainer.get(app.id);
+          }
+        });
 
         perf.start("system-ports-collection");
         const systemPorts = await this._getCachedOrFresh(
@@ -792,7 +1020,10 @@ class TrueNASCollector extends BaseCollector {
           await this._buildHostProcToContainerMap();
 
         for (const port of dockerPorts) {
-          const key = `${port.host_ip}:${port.host_port}`;
+          // Use different key pattern for internal vs external ports
+          const key = port.internal 
+            ? `${port.container_id}:${port.host_port}:internal`
+            : `${port.host_ip}:${port.host_port}`;
           port.created =
             containerCreationTimeMap.get(port.container_id) || null;
           uniquePorts.set(key, port);
@@ -940,8 +1171,16 @@ class TrueNASCollector extends BaseCollector {
       const apiKey = process.env.TRUENAS_API_KEY;
       if (apiKey) {
         this.logInfo("API key detected - collecting enhanced TrueNAS features");
+        
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error("TrueNAS connection timeout after 15 seconds")), 15000)
+        );
+        
         try {
-          const enhancedData = await this._collectEnhancedFeatures();
+          const enhancedData = await Promise.race([
+            this._collectEnhancedFeatures(),
+            timeoutPromise
+          ]);
           if (enhancedData.systemInfo) {
             results.systemInfo = {
               ...results.systemInfo,
@@ -969,7 +1208,7 @@ class TrueNASCollector extends BaseCollector {
               },
             }));
             results.applications.push(...truenasApps);
-            this.logInfo(`Collected ${truenasApps.length} TrueNAS native apps`);
+            this.log(`Collected ${truenasApps.length} TrueNAS native apps`);
           }
           if (enhancedData.vms && enhancedData.vms.length > 0) {
             results.vms = enhancedData.vms.map((vm) => ({
@@ -990,17 +1229,19 @@ class TrueNASCollector extends BaseCollector {
                 orig_data: vm,
               },
             }));
-            this.logInfo(`Collected ${results.vms.length} virtual machines`);
+            this.log(`Collected ${results.vms.length} virtual machines`);
           }
           this.logInfo("Enhanced features collection completed successfully");
         } catch (err) {
-          this.logWarn(
-            `Enhanced features collection failed: ${err.message.substring(
-              0,
-              100
-            )}...`
-          );
-          this.logInfo("Continuing with core functionality only");
+          this.logWarn("TrueNAS enhanced features collection failed:", err.message);
+          this.logInfo("Continuing with Docker and system port data only");
+        } finally {
+          if (this.client) {
+            try {
+              this.client.close();
+            } catch (closeErr) {
+            }
+          }
         }
       } else {
         this.logInfo(
@@ -1014,13 +1255,13 @@ class TrueNASCollector extends BaseCollector {
 
       perf.end("total-collection");
 
-      // Log performance summary
+      // Log performance summary at debug level
       const summary = perf.getSummary();
-      this.logInfo("=== Performance Summary ===");
+      this.log("=== Performance Summary ===");
       summary.forEach(({ operation, duration }) => {
-        this.logInfo(`  ${operation}: ${duration}ms`);
+        this.log(`  ${operation}: ${duration}ms`);
       });
-      this.logInfo("=== End Performance Summary ===");
+      this.log("=== End Performance Summary ===");
 
       // Log cache status for monitoring
       const cacheStatus = Object.keys(this.cache)
@@ -1034,11 +1275,11 @@ class TrueNASCollector extends BaseCollector {
         })
         .join(", ");
 
-      this.logInfo(`Cache status: ${cacheStatus}`);
+      this.log(`Cache status: ${cacheStatus}`);
       this.logInfo(
         `Collection complete: ${results.applications.length} apps, ${results.ports.length} ports, ${results.vms.length} VMs`
       );
-      this.logInfo(
+      this.log(
         `Enhanced features: ${
           results.enhancedFeaturesEnabled ? "ENABLED" : "DISABLED"
         }`
@@ -1513,7 +1754,7 @@ class TrueNASCollector extends BaseCollector {
       try {
         const systemInfo = await this.client.call("system.info");
         results.systemInfo = systemInfo;
-        this.logInfo("Enhanced system info retrieved");
+        this.log("Enhanced system info retrieved");
       } catch (err) {
         this.logWarn(
           "Enhanced system info API call failed:",
@@ -1523,7 +1764,6 @@ class TrueNASCollector extends BaseCollector {
       try {
         const apps = await this.client.call("app.query");
         results.apps = apps || [];
-        this.logInfo(`Found ${results.apps.length} TrueNAS apps via API`);
       } catch (err) {
         this.logWarn(
           "TrueNAS apps API query failed:",
@@ -1533,7 +1773,6 @@ class TrueNASCollector extends BaseCollector {
       try {
         const vms = await this.client.call("virt.instance.query");
         results.vms = vms || [];
-        this.logInfo(`Found ${results.vms.length} VMs via API`);
       } catch (err) {
         this.logWarn("VM API query failed:", err.message.substring(0, 50));
       }

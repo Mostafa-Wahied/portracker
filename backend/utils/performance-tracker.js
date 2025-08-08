@@ -1,9 +1,12 @@
 /**
  * Simple performance tracking utility for measuring operation durations
  */
+const { Logger } = require('../lib/logger');
+
 class PerformanceTracker {
   constructor() {
     this.operations = new Map();
+    this.logger = new Logger("Performance", { debug: process.env.DEBUG === 'true' });
   }
 
   /**
@@ -22,15 +25,15 @@ class PerformanceTracker {
   end(operation) {
     const op = this.operations.get(operation);
     if (!op) {
-      console.warn(
-        `[Performance] Warning: No start time found for operation '${operation}'`
+      this.logger.warn(
+        `Warning: No start time found for operation '${operation}'`
       );
       return 0;
     }
 
     const duration = Date.now() - op.startTime;
     op.duration = duration;
-    console.log(`[Performance] ${operation}: ${duration}ms`);
+    this.logger.debug(`${operation}: ${duration}ms`);
     return duration;
   }
 

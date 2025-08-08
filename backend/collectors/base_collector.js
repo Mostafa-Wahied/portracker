@@ -6,6 +6,8 @@
  * applications, ports, and virtual machines from a specific platform.
  */
 
+const { Logger } = require("../lib/logger");
+
 class BaseCollector {
   /**
    * Create a new collector instance
@@ -16,6 +18,9 @@ class BaseCollector {
     this.debug = config.debug || false;
     this.platform = "generic";
     this.platformName = "Generic Platform";
+    
+    // Initialize logger for this collector
+    this.logger = new Logger(this.platformName, { debug: this.debug });
   }
 
   /**
@@ -93,7 +98,7 @@ class BaseCollector {
         },
       };
     } catch (error) {
-      this.logError(`Error collecting all data: ${error.message}`);
+      this.logger.error(`Error collecting all data: ${error.message}`);
       return {
         platform: this.platform,
         platformName: this.platformName,
@@ -142,6 +147,7 @@ class BaseCollector {
       vm_id: entry.vm_id || null,
       app_id: entry.app_id || null,
       created: entry.created || null,
+      internal: entry.internal || false,
     };
   }
 
@@ -150,7 +156,7 @@ class BaseCollector {
    * @param {...any} args Arguments to log
    */
   logInfo(...args) {
-    console.log(`[${this.platformName}] INFO:`, ...args);
+    this.logger.info(...args);
   }
 
   /**
@@ -158,9 +164,7 @@ class BaseCollector {
    * @param {...any} args Arguments to log
    */
   log(...args) {
-    if (this.debug) {
-      console.log(`[${this.platformName}] DEBUG:`, ...args);
-    }
+    this.logger.debug(...args);
   }
 
   /**
@@ -168,7 +172,7 @@ class BaseCollector {
    * @param {...any} args Arguments to log
    */
   logError(...args) {
-    console.error(`[${this.platformName}] ERROR:`, ...args);
+    this.logger.error(...args);
   }
 
   /**
@@ -176,7 +180,7 @@ class BaseCollector {
    * @param {...any} args Arguments to log
    */
   logWarn(...args) {
-    console.warn(`[${this.platformName}] WARN:`, ...args);
+    this.logger.warn(...args);
   }
 }
 

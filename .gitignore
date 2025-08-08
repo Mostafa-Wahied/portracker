@@ -5,6 +5,8 @@ node_modules/
 dist/
 build/
 
+misc/
+
 # Ignore specific backend files
 backend/data/*.db
 backend/data/*.json

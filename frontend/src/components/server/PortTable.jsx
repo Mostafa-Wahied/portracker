@@ -98,7 +98,11 @@ export function PortTable({
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
           {ports.map((port) => (
             <PortTableRow
-              key={`${serverId}-${port.host_ip}-${port.host_port}`}
+              key={
+                port.internal
+                  ? `${serverId}-${port.container_id || port.app_id}-${port.host_port}-internal`
+                  : `${serverId}-${port.host_ip}-${port.host_port}`
+              }
               port={port}
               serverId={serverId}
               serverUrl={serverUrl}

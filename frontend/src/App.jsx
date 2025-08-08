@@ -17,8 +17,12 @@ import { Label } from "@/components/ui/label";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { MultipleServerSkeleton } from "./components/server/MultipleServerSkeleton";
 import { BarChart3 } from "lucide-react";
+import Logger from "./lib/logger";
 
 const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
+
+// Initialize logger for App component
+const logger = new Logger('App');
 
 export default function App() {
   const [groups, setGroups] = useState([]);
@@ -131,7 +135,7 @@ export default function App() {
     try {
       localStorage.setItem("portFilters", JSON.stringify(filters));
     } catch (error) {
-      console.warn("Failed to save filter settings:", error);
+      logger.warn("Failed to save filter settings:", error);
     }
   }, [filters]);
 
@@ -139,7 +143,7 @@ export default function App() {
     try {
       localStorage.setItem("expandedServers", JSON.stringify(expandedServers));
     } catch (error) {
-      console.warn("Failed to save expanded servers state:", error);
+      logger.warn("Failed to save expanded servers state:", error);
     }
   }, [expandedServers]);
 
@@ -147,7 +151,7 @@ export default function App() {
     try {
       localStorage.setItem("openAccordions", JSON.stringify(openAccordions));
     } catch (error) {
-      console.warn("Failed to save open accordions state:", error);
+      logger.warn("Failed to save open accordions state:", error);
     }
   }, [openAccordions]);
 
@@ -155,7 +159,7 @@ export default function App() {
     try {
       localStorage.setItem("infoCardLayout", infoCardLayout);
     } catch (error) {
-      console.warn("Failed to save info card layout setting:", error);
+      logger.warn("Failed to save info card layout setting:", error);
     }
   }, [infoCardLayout]);
 
@@ -163,7 +167,7 @@ export default function App() {
     try {
       localStorage.setItem("portLayout", portLayout);
     } catch (error) {
-      console.warn("Failed to save port layout setting:", error);
+      logger.warn("Failed to save port layout setting:", error);
     }
   }, [portLayout]);
 
@@ -182,7 +186,7 @@ export default function App() {
         JSON.stringify(searchHighlighting)
       );
     } catch (error) {
-      console.warn("Failed to save search highlighting setting:", error);
+      logger.warn("Failed to save search highlighting setting:", error);
     }
   }, [searchHighlighting]);
 
@@ -210,8 +214,8 @@ export default function App() {
   const transformCollectorData = useCallback(
     async (collectorData, serverId) => {
       if (!collectorData.ports || !Array.isArray(collectorData.ports)) {
-        console.warn(
-          `[App] transformCollectorData: No ports array in collectorData for serverId ${serverId}`,
+        logger.warn(
+          `transformCollectorData: No ports array in collectorData for serverId ${serverId}`,
           collectorData
         );
         return [];
@@ -241,18 +245,21 @@ export default function App() {
           note: port.note || null,
           ignored: !!port.ignored,
           created: port.created || null,
+          internal: port.internal || false,
         }));
 
       const uniquePorts = [];
       const seenKeys = new Set();
 
       transformedPorts.forEach((port) => {
-        const key = `${port.host_ip}:${port.host_port}:${port.owner}`;
+        const key = port.internal 
+          ? `${port.container_id || port.app_id}:${port.host_port}:internal`
+          : `${port.host_ip}:${port.host_port}:${port.owner}`;      
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           uniquePorts.push(port);
         } else {
-          console.warn("Filtering out duplicate port:", port);
+          logger.debug(`DUPLICATE DETECTED - Filtering out port with key: ${key}`, port);
         }
       });
 
@@ -296,8 +303,8 @@ export default function App() {
         });
       });
 
-      console.log(
-        `Transformed ${collectorData.ports.length} raw ports into ${portsWithGroupInfo.length} unique valid ports with grouping`
+      logger.debug(
+        `Final result: Transformed ${collectorData.ports.length} raw ports into ${portsWithGroupInfo.length} unique valid ports with grouping`
       );
       return portsWithGroupInfo;
     },
@@ -348,7 +355,7 @@ export default function App() {
                   .catch(() => ({
                     error: `Local scan failed with status ${scanResponse.status}`,
                   }));
-                console.warn(
+                logger.warn(
                   `Local scan API for ${server.id} failed:`,
                   errorData.error
                 );
@@ -363,7 +370,7 @@ export default function App() {
                 };
               }
             } catch (error) {
-              console.error("Error scanning local server:", error);
+              logger.error("Error scanning local server:", error);
               return {
                 id: server.id,
                 server: server.label,
@@ -406,7 +413,7 @@ export default function App() {
                 const errorData = await scanResponse.json().catch(() => ({
                   error: `Failed to scan peer '${server.label}' via backend. Status: ${scanResponse.status}`,
                 }));
-                console.warn(
+                logger.warn(
                   `Failed to scan peer ${server.id} (${server.label}):`,
                   errorData.details || errorData.error
                 );
@@ -424,7 +431,7 @@ export default function App() {
                 };
               }
             } catch (error) {
-              console.error(
+              logger.error(
                 `Error fetching scan for peer ${server.id} (${server.label}):`,
                 error
               );
@@ -455,10 +462,10 @@ export default function App() {
       setGroups(enrichedServers);
       setTimeout(() => setLoading(false), 300);
     } catch (error) {
-      console.error("Error in fetchAll:", error);
+      logger.error("Error in fetchAll:", error);
 
       try {
-        console.warn(
+        logger.warn(
           "Primary fetch failed, attempting complete fallback to legacy API"
         );
         const fallbackResponse = await fetch("/api/all-ports");
@@ -469,7 +476,7 @@ export default function App() {
           return;
         }
       } catch (fallbackError) {
-        console.error("Even fallback API failed:", fallbackError);
+        logger.error("Even fallback API failed:", fallbackError);
       }
 
       setError(error.toString());
@@ -554,7 +561,7 @@ export default function App() {
             throw new Error("Failed to update ignore status on backend.");
         })
         .catch((error) => {
-          console.error("Error toggling ignore:", error);
+          logger.error("Error toggling ignore:", error);
           setGroups((currentGroups) =>
             currentGroups.map((group) => {
               if (group.id === srvId) {
@@ -633,7 +640,7 @@ export default function App() {
         if (!response.ok) throw new Error("Failed to save note on backend.");
       })
       .catch((error) => {
-        console.error("Error saving note:", error);
+        logger.error("Error saving note:", error);
         setGroups((currentGroups) =>
           currentGroups.map((group) => {
             if (group.id === modalSrvId) {
@@ -658,7 +665,7 @@ export default function App() {
     fetch("/api/servers")
       .then((r) => r.json())
       .then(setServers)
-      .catch(console.error);
+      .catch(logger.error);
   }, []);
 
   const addServer = useCallback(
@@ -701,7 +708,7 @@ export default function App() {
           }
         } catch (error) {
           setGroups(originalGroups);
-          console.error("Failed to save server:", error);
+          logger.error("Failed to save server:", error);
           throw error;
         }
       } else {
@@ -790,7 +797,7 @@ export default function App() {
             );
           }
         } catch (error) {
-          console.error("Failed to add server:", error);
+          logger.error("Failed to add server:", error);
           setGroups((currentGroups) =>
             currentGroups.filter((g) => g.id !== serverData.id)
           );
@@ -826,7 +833,7 @@ export default function App() {
       } catch (error) {
         setServers(originalServers);
         setGroups(originalGroups);
-        console.error("Failed to delete server:", error);
+        logger.error("Failed to delete server:", error);
       }
     },
     [servers, groups, selectedServer, fetchServers]
@@ -927,7 +934,7 @@ export default function App() {
                 );
               })
               .catch((err) => {
-                console.warn("Clipboard write failed, using fallback:", err);
+                logger.warn("Clipboard write failed, using fallback:", err);
                 copyToClipboardFallback(urlToCopy, server.id, p);
               });
           } else {
@@ -1087,7 +1094,7 @@ export default function App() {
         prompt("Copy this URL:", text);
       }
     } catch (err) {
-      console.warn("Copy failed:", err);
+      logger.warn("Copy failed:", err);
       prompt("Copy this URL:", text);
     } finally {
       document.body.removeChild(textArea);

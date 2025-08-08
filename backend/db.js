@@ -2,41 +2,10 @@
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
+const { Logger } = require("./lib/logger");
 
-/**
- * Log database INFO message
- * @param {...any} args Arguments to log
- */
-function dbLog(...args) {
-  console.log("[Database] INFO:", ...args);
-}
-
-/**
- * Log database ERROR message
- * @param {...any} args Arguments to log
- */
-function dbError(...args) {
-  console.error("[Database] ERROR:", ...args);
-}
-
-/**
- * Log database WARN message
- * @param {...any} args Arguments to log
- */
-function dbWarn(...args) {
-  console.warn("[Database] WARN:", ...args);
-}
-
-/**
- * Log database DEBUG message (only if appDebugEnabled is true)
- * @param {boolean} appDebugEnabled - Whether application-level debug is enabled.
- * @param {...any} args Arguments to log
- */
-function dbDebug(appDebugEnabled, ...args) {
-  if (appDebugEnabled) {
-    console.log("[Database] DEBUG:", ...args);
-  }
-}
+// Initialize logger for database operations
+const logger = new Logger("Database", { debug: process.env.DEBUG === 'true' });
 
 // Where to store DB: use env if present, else fallback to ./data/ports-tracker.db
 const defaultDataDir = path.resolve(process.cwd(), "data");
@@ -47,7 +16,7 @@ const dbPath = process.env.DATABASE_PATH || defaultDbPath;
 if (!process.env.DATABASE_PATH) {
   fs.mkdirSync(defaultDataDir, { recursive: true });
 }
-dbLog("Using database at", dbPath);
+logger.info("Using database at", dbPath);
 const db = new Database(dbPath);
 
 // Check if servers table exists
@@ -59,7 +28,7 @@ const tableExists = db
 
 // If not existing, create with all required columns
 if (!tableExists) {
-  dbLog("Creating new database tables with updated schema");
+  logger.info("Creating new database tables with updated schema");
   db.exec(`
     CREATE TABLE servers (
       id TEXT PRIMARY KEY,
@@ -90,13 +59,13 @@ if (!tableExists) {
   try {
     const notesColumns = db.prepare("PRAGMA table_info(notes)").all();
     if (!notesColumns.some((col) => col.name === "updated_at")) {
-      dbLog('Schema migration: Adding "updated_at" column to "notes" table.');
+      logger.info('Schema migration: Adding "updated_at" column to "notes" table.');
       db.prepare("ALTER TABLE notes ADD COLUMN updated_at DATETIME").run();
     }
   } catch (err) {
     // This can happen if the table doesn't exist yet on first run, which is fine.
     if (!err.message.includes("no such table: notes")) {
-      dbLog("Error during notes table schema check:", err.message);
+      logger.info("Error during notes table schema check:", err.message);
     }
   }
 
@@ -116,7 +85,7 @@ if (!tableExists) {
     // Add updated_at to notes table if it doesn't exist
     const notesColumns = db.prepare("PRAGMA table_info(notes)").all();
     if (!notesColumns.some((col) => col.name === "updated_at")) {
-      dbLog('Schema migration: Adding "updated_at" column to "notes" table.');
+      logger.info('Schema migration: Adding "updated_at" column to "notes" table.');
       db.prepare("ALTER TABLE notes ADD COLUMN updated_at DATETIME").run();
     }
 
@@ -124,7 +93,7 @@ if (!tableExists) {
     const columnNames = columns.map((col) => col.name);
 
     if (!columnNames.includes("type")) {
-      dbLog(
+      logger.info(
         "Migrating database: Table needs major restructuring (missing type column)"
       );
       const tempTableExists = db
@@ -133,7 +102,7 @@ if (!tableExists) {
         )
         .get();
       if (tempTableExists) {
-        dbLog("Dropping existing temporary table servers_new");
+        logger.debug("Dropping existing temporary table servers_new");
         db.exec(`DROP TABLE servers_new;`);
       }
       const existingServers = db.prepare("SELECT * FROM servers").all();
@@ -184,24 +153,24 @@ if (!tableExists) {
         DROP TABLE servers;
         ALTER TABLE servers_new RENAME TO servers;
       `);
-      dbLog(
+      logger.info(
         'Database schema migration for "type" column completed successfully'
       );
     } else {
       if (!columnNames.includes("platform")) {
-        dbLog("Migrating database: Adding platform column to servers table");
+        logger.info("Migrating database: Adding platform column to servers table");
         db.prepare(
           "ALTER TABLE servers ADD COLUMN platform TEXT DEFAULT 'standard'"
         ).run();
       }
       if (!columnNames.includes("platform_config")) {
-        dbLog(
+        logger.info(
           "Migrating database: Adding platform_config column to servers table"
         );
         db.prepare("ALTER TABLE servers ADD COLUMN platform_config TEXT").run();
       }
       if (!columnNames.includes("platform_type")) {
-        dbLog(
+        logger.info(
           "Migrating database: Adding platform_type column to servers table"
         );
         db.prepare(
@@ -210,11 +179,11 @@ if (!tableExists) {
       }
     }
   } catch (migrationError) {
-    dbError(
+    logger.error(
       "FATAL: Database schema migration failed:",
-      migrationError.message,
-      migrationError.stack || ""
+      migrationError.message
     );
+    logger.debug("Stack trace:", migrationError.stack || "");
     // If migration fails, server may not be able to run.
   }
 }
@@ -233,7 +202,7 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
       !columnNames.includes("type") ||
       !columnNames.includes("platform_type")
     ) {
-      dbWarn(
+      logger.warn(
         'Cannot ensure local server: "servers" table schema not fully migrated (missing "type" or "platform_type" column).'
       );
       return false;
@@ -246,7 +215,7 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
     const targetPlatformType = "auto";
 
     if (!localServer) {
-      dbLog(
+      logger.info(
         `Adding local server to database. ID: local, URL: ${targetUrl}, Platform Type: ${targetPlatformType}`
       );
       db.prepare(
@@ -264,13 +233,13 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
         updateClauses.push("url = ?");
         updateValues.push(targetUrl);
         needsUpdate = true;
-        dbLog(`Local server URL will be updated to ${targetUrl}.`);
+        logger.info(`Local server URL will be updated to ${targetUrl}.`);
       }
       if (localServer.platform_type !== targetPlatformType) {
         updateClauses.push("platform_type = ?");
         updateValues.push(targetPlatformType);
         needsUpdate = true;
-        dbLog(
+        logger.info(
           `Local server platform_type will be reset to '${targetPlatformType}' for auto-detection.`
         );
       }
@@ -278,7 +247,7 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
         updateClauses.push("type = ?");
         updateValues.push("local");
         needsUpdate = true;
-        dbLog(`Local server type will be corrected to 'local'.`);
+        logger.info(`Local server type will be corrected to 'local'.`);
       }
 
       if (needsUpdate) {
@@ -286,14 +255,17 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
         db.prepare(
           `UPDATE servers SET ${updateClauses.join(", ")} WHERE id = ?`
         ).run(...updateValues);
-        dbLog("Local server entry updated.");
+        logger.info("Local server entry updated.");
       } else {
-        dbDebug(appDebugEnabled, "Local server entry already up-to-date.");
+        if (appDebugEnabled) {
+          logger.debug("Local server entry already up-to-date.");
+        }
       }
     }
     return true;
   } catch (e) {
-    dbError("Error ensuring local server exists:", e.message, e.stack || "");
+    logger.error("Error ensuring local server exists:", e.message);
+    logger.debug("Stack trace:", e.stack || "");
     return false;
   }
 }
@@ -306,7 +278,7 @@ function ensureLocalServer(port = 3000, appDebugEnabled = false) {
 function updateLocalServerPlatformType(platformType, appDebugEnabled = false) {
   try {
     if (!platformType || typeof platformType !== "string") {
-      dbWarn(
+      logger.warn(
         "Invalid platformType provided to updateLocalServerPlatformType. Received:",
         platformType
       );
@@ -316,21 +288,22 @@ function updateLocalServerPlatformType(platformType, appDebugEnabled = false) {
       .prepare("UPDATE servers SET platform_type = ? WHERE id = 'local'")
       .run(platformType);
     if (result.changes > 0) {
-      dbLog(
+      logger.info(
         `Local server platform_type updated to '${platformType}' in database.`
       );
     } else {
-      dbDebug(
-        appDebugEnabled,
-        `updateLocalServerPlatformType called with '${platformType}', but no changes were made to the database (current value might be the same or 'local' server missing).`
-      );
+      if (appDebugEnabled) {
+        logger.debug(
+          `updateLocalServerPlatformType called with '${platformType}', but no changes were made to the database (current value might be the same or 'local' server missing).`
+        );
+      }
     }
   } catch (e) {
-    dbError(
+    logger.error(
       "Failed to update local server platform_type:",
-      e.message,
-      e.stack || ""
+      e.message
     );
+    logger.debug("Stack trace:", e.stack || "");
   }
 }
 

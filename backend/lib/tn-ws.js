@@ -4,11 +4,19 @@
  */
 
 const WebSocket = require("ws");
-const debugWS = require("debug")("ports-tracker:truenas:ws");
+const { Logger } = require('./logger');
 const {
   discoverUIConfig,
   generateWebSocketURLs,
 } = require("./truenas-auto-discover");
+
+// Initialize centralized logger
+const logger = new Logger("TrueNAS-WS", { debug: process.env.DEBUG === 'true' });
+
+// Helper to log debug messages consistently
+function debugWS(message, ...args) {
+  logger.debug(message, ...args);
+}
 
 /**
  * Get TrueNAS WebSocket URLs to try

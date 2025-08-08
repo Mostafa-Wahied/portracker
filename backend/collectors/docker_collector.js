@@ -12,6 +12,7 @@ const util = require("util");
 const execAsync = util.promisify(exec);
 const fs = require("fs");
 const os = require("os");
+const ProcParser = require("../lib/proc-parser");
 
 class DockerCollector extends BaseCollector {
   /**
@@ -23,6 +24,7 @@ class DockerCollector extends BaseCollector {
     this.platform = "docker";
     this.platformName = "Docker";
     this.name = "Docker Collector";
+    this.procParser = new ProcParser();
   }
 
   /**
@@ -296,10 +298,9 @@ class DockerCollector extends BaseCollector {
       const allPorts = [];
       const dockerPortsMap = new Map();
       const dockerProcessMap = new Map();
-      const containerCreationTimeMap = new Map(); // Add this
+      const containerCreationTimeMap = new Map();
 
       try {
-        // Get container creation times
         const dockerContainers = await this.getApplications();
         dockerContainers.forEach((container) => {
           if (container.created) {
@@ -311,7 +312,6 @@ class DockerCollector extends BaseCollector {
         dockerPorts.forEach((port) => {
           const key = `${port.host_ip}:${port.host_port}`;
           if (!dockerPortsMap.has(key)) {
-            // Add created timestamp from container
             if (port.container_id) {
               port.created = containerCreationTimeMap.get(port.container_id) || null;
             }
@@ -325,6 +325,19 @@ class DockerCollector extends BaseCollector {
           if (container.pids && container.pids.length > 0) {
             container.pids.forEach((pid) => {
               dockerProcessMap.set(pid, container);
+            });
+          }
+
+          if (container.internalPorts && container.internalPorts.length > 0) {
+            container.internalPorts.forEach((internalPort) => {
+              const publishedKey = `${internalPort.host_ip}:${internalPort.host_port}`;
+              const internalKey = `${internalPort.host_ip}:${internalPort.host_port}:${container.id}:internal`;
+              
+              if (!dockerPortsMap.has(publishedKey) && !dockerPortsMap.has(internalKey)) {
+                internalPort.created = containerCreationTimeMap.get(container.id) || null;
+                dockerPortsMap.set(internalKey, internalPort);
+                allPorts.push(this.normalizePortEntry(internalPort));
+              }
             });
           }
         });
@@ -352,7 +365,6 @@ class DockerCollector extends BaseCollector {
                   containerId: container.id,
                   target: `${container.id.substring(0, 12)}:internal(host-net)`,
                 };
-                // Add created timestamp for host-networked containers
                 port.created = containerCreationTimeMap.get(container.id) || null;
                 break;
               }
@@ -463,6 +475,27 @@ class DockerCollector extends BaseCollector {
             exposedPorts = null;
           }
 
+          const internalPorts = [];
+          if (exposedPorts && typeof exposedPorts === 'object') {
+            Object.keys(exposedPorts).forEach(portDef => {
+              const [port, protocol] = portDef.split('/');
+              const portNum = parseInt(port, 10);
+              if (!isNaN(portNum)) {
+                internalPorts.push({
+                  source: "docker",
+                  owner: containerName,
+                  protocol: protocol || "tcp",
+                  host_ip: "0.0.0.0",
+                  host_port: portNum,
+                  target: `${containerId.substring(0, 12)}:${portNum}(internal)`,
+                  container_id: containerId,
+                  app_id: containerName,
+                  internal: true
+                });
+              }
+            });
+          }
+
           return {
             id: containerId,
             name: containerName,
@@ -470,6 +503,7 @@ class DockerCollector extends BaseCollector {
             networkMode: networkMode,
             exposedPorts: exposedPorts,
             pids: pids,
+            internalPorts: internalPorts
           };
         } catch (inspectErr) {
           this.logWarn(
@@ -681,24 +715,75 @@ class DockerCollector extends BaseCollector {
    */
   async _getLinuxSystemPorts() {
     try {
-      this.logInfo('Attempting to get Linux ports with "ss -tulnp" command');
-      const { stdout } = await execAsync("ss -tulnp");
-      return this._parseLinuxSystemOutput(stdout);
-    } catch (err) {
-      this.logWarn(
-        `Linux "ss" command failed: ${err.message}. Trying "netstat" as fallback.`
-      );
+      this.logInfo("Attempting nsenter method for comprehensive port collection with process names");
+      const { stdout } = await execAsync("nsenter -t 1 -n ss -tulpn 2>/dev/null");
+      const ports = this._parseLinuxSystemOutput(stdout);
+      this.logInfo(`nsenter method successful: ${ports.length} ports found with process names`);
+      return ports;
+    } catch (nsenterErr) {
+      this.logInfo(`nsenter method failed: ${nsenterErr.message}, trying alternative methods`);
+      
       try {
-        this.logInfo(
-          'Attempting to get Linux ports with "netstat -tulnp" command (fallback)'
-        );
-        const { stdout } = await execAsync("netstat -tulnp");
-        return this._parseLinuxSystemOutput(stdout, true);
-      } catch (fallbackErr) {
-        this.logError(
-          `Linux "netstat" fallback also failed: ${fallbackErr.message}`
-        );
-        return [];
+        const { stdout: netNsCheck } = await execAsync("readlink /proc/self/ns/net 2>/dev/null");
+        const { stdout: hostNetNsCheck } = await execAsync("readlink /proc/1/ns/net 2>/dev/null");
+        
+        if (netNsCheck.trim() === hostNetNsCheck.trim()) {
+          this.logInfo("Container has host network access, using direct ss");
+          const { stdout } = await execAsync("ss -tulpn 2>/dev/null || ss -tuln");
+          return this._parseLinuxSystemOutput(stdout);
+        } else {
+          this.logInfo("Limited network access, using container namespace ss");
+          const { stdout } = await execAsync("ss -tulpn 2>/dev/null || ss -tuln");
+          return this._parseLinuxSystemOutput(stdout);
+        }
+      } catch (nsCheckErr) {
+        this.logInfo(`Network namespace check failed: ${nsCheckErr.message}, falling back to /proc method`);
+        
+        if (this.procParser) {
+          try {
+            this.logInfo("Falling back to /proc filesystem method");
+            const procWorks = await this.procParser.testProcAccess();
+            
+            if (procWorks) {
+              const tcpPorts = await this.procParser.getTcpPorts();
+              const includeAllUdp = process.env.INCLUDE_UDP === 'true';
+              const udpPorts = await this.procParser.getUdpPorts(includeAllUdp);
+              const allPorts = [...tcpPorts, ...udpPorts];
+              
+              if (allPorts.length >= 2) {
+                for (const port of allPorts) {
+                  if (port.pid) {
+                    const containerId = await this.procParser.getContainerByPid(port.pid);
+                    if (containerId) {
+                      port.container_id = containerId;
+                      port.source = 'docker';
+                      try {
+                        const { stdout } = await execAsync(`docker inspect --format '{{.Name}}' ${containerId}`);
+                        port.owner = stdout.trim().replace(/^\//, '');
+                      } catch (err) {
+                        // Container might have been removed
+                      }
+                    }
+                  }
+                }
+                
+                this.logInfo(`Fallback /proc method: ${allPorts.length} ports found (TCP: ${tcpPorts.length}, UDP: ${udpPorts.length})`);
+                return allPorts.map(port => this.normalizePortEntry(port));
+              }
+            }
+          } catch (procErr) {
+            this.logWarn("Proc fallback also failed:", procErr.message);
+          }
+        }
+        
+        try {
+          this.logInfo("Final fallback: netstat command");
+          const { stdout } = await execAsync("netstat -tulnp 2>/dev/null || netstat -tuln");
+          return this._parseLinuxSystemOutput(stdout, true);
+        } catch (fallbackErr) {
+          this.logError(`All methods failed: ${fallbackErr.message}`);
+          return [];
+        }
       }
     }
   }
@@ -741,7 +826,6 @@ class DockerCollector extends BaseCollector {
   _parseLinuxSystemOutput(output, isNetstat = false) {
     const entries = [];
     const lines = output.split("\n");
-
     const startIndex = isNetstat ? 2 : 1;
 
     for (let i = startIndex; i < lines.length; i++) {
@@ -791,19 +875,35 @@ class DockerCollector extends BaseCollector {
         }
       }
 
-      entries.push(
-        this.normalizePortEntry({
-          source: "system",
-          owner,
-          protocol: protocol.includes("tcp") ? "tcp" : "udp",
-          host_ip: host_ip === "*" ? "0.0.0.0" : host_ip,
-          host_port,
-          target: null,
-          container_id: null,
-          app_id: null,
-          pids: pid !== null ? [pid] : [],
-        })
-      );
+      if (owner === "dockerd") {
+        entries.push(
+          this.normalizePortEntry({
+            source: "docker",
+            owner: "unknown",
+            protocol: protocol.includes("tcp") ? "tcp" : "udp",
+            host_ip: host_ip === "*" ? "0.0.0.0" : host_ip,
+            host_port,
+            target: null,
+            container_id: null,
+            app_id: null,
+            pids: pid !== null ? [pid] : [],
+          })
+        );
+      } else {
+        entries.push(
+          this.normalizePortEntry({
+            source: "system",
+            owner,
+            protocol: protocol.includes("tcp") ? "tcp" : "udp",
+            host_ip: host_ip === "*" ? "0.0.0.0" : host_ip,
+            host_port,
+            target: null,
+            container_id: null,
+            app_id: null,
+            pids: pid !== null ? [pid] : [],
+          })
+        );
+      }
     }
 
     return entries;

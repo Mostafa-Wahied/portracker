@@ -12,7 +12,7 @@ export function PortStatusIndicator({
   port,
   onProtocolChange,
 }) {
-  const [reachable, setReachable] = useState(null);
+  const [statusData, setStatusData] = useState(null);
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
@@ -22,6 +22,10 @@ export function PortStatusIndicator({
     let pingApiUrl = `/api/ping?host_ip=${encodeURIComponent(
       port.host_ip
     )}&host_port=${port.host_port}`;
+    
+    if (port.owner) {
+      pingApiUrl += `&owner=${encodeURIComponent(port.owner)}`;
+    }
 
     if (
       serverId &&
@@ -37,12 +41,17 @@ export function PortStatusIndicator({
         res.ok ? res.json() : Promise.reject(`API ping failed: ${res.status}`)
       )
       .then((data) => {
-        setReachable(data.reachable);
+        setStatusData(data);
         if (onProtocolChange && data.protocol) {
           onProtocolChange(data.protocol);
         }
       })
-      .catch(() => setReachable(false))
+      .catch(() => setStatusData({ 
+        reachable: false, 
+        status: 'unreachable',
+        color: 'red',
+        title: 'Connection failed'
+      }))
       .finally(() => {
         clearTimeout(timeoutId);
         setChecking(false);
@@ -52,24 +61,33 @@ export function PortStatusIndicator({
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [port.host_ip, port.host_port, serverId, serverUrl, onProtocolChange]);
+  }, [port.host_ip, port.host_port, port.owner, serverId, serverUrl, onProtocolChange]);
 
   const getDotState = () => {
     if (checking) {
       return {
         color: "bg-blue-400 animate-pulse",
-        title: "Checking port status...",
+        title: "Checking service status...",
       };
     }
-    if (reachable === null) {
+    
+    if (!statusData) {
       return {
         color: "bg-gray-400",
         title: "Status unknown",
       };
     }
+    
+    const colorMap = {
+      green: "bg-green-500",
+      yellow: "bg-yellow-500", 
+      red: "bg-red-500",
+      gray: "bg-gray-400"
+    };
+    
     return {
-      color: reachable ? "bg-green-500" : "bg-red-500",
-      title: reachable ? "Port is reachable" : "Port is unreachable",
+      color: colorMap[statusData.color] || "bg-gray-400",
+      title: statusData.title || "Status unknown",
     };
   };
 
@@ -82,7 +100,7 @@ export function PortStatusIndicator({
           <div className={`w-2.5 h-2.5 rounded-full ${dotState.color}`} />
         </TooltipTrigger>
         <TooltipContent>
-          <p>{dotState.title}</p>
+          <p className="font-medium">{dotState.title}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

@@ -8,13 +8,14 @@
  */
 
 const { connectWs } = require("./tn-ws");
-const debugRPC = require("debug")("ports-tracker:truenas:rpc");
+const { Logger } = require('./logger');
 
 /**
  * TrueNAS middleware client using Unix socket first, WebSocket fallback
  */
 class TrueNASClient {
   constructor(options = {}) {
+    this.logger = new Logger("TrueNAS-RPC", { debug: options.debug || false });
     this.appDebugEnabled = options.debug || false;
 
     this.client = null;
@@ -30,7 +31,7 @@ class TrueNASClient {
    * @param {...any} args Arguments to log
    */
   logError(...args) {
-    console.error("[TrueNAS-RPC]", ...args);
+    this.logger.error(...args);
   }
 
   async connect() {
@@ -39,7 +40,7 @@ class TrueNASClient {
     }
 
     if (this.appDebugEnabled) {
-      debugRPC("Attempting to connect...");
+      this.logger.debug("Attempting to connect...");
     }
     await this._doConnect();
   }
@@ -47,12 +48,12 @@ class TrueNASClient {
   async _doConnect() {
     try {
       if (this.appDebugEnabled) {
-        debugRPC("Attempting WebSocket connection...");
+        this.logger.debug("Attempting WebSocket connection...");
       }
 
       if (!this.apiKey) {
         if (this.appDebugEnabled) {
-          debugRPC(
+          this.logger.info(
             "ℹ️ No API key provided - TrueNAS enhanced features will be disabled. Setting up graceful degradation."
           );
         }
@@ -61,7 +62,7 @@ class TrueNASClient {
       }
 
       if (this.appDebugEnabled) {
-        debugRPC(
+        this.logger.debug(
           "API key found - attempting authenticated WebSocket connection"
         );
       }
@@ -76,11 +77,11 @@ class TrueNASClient {
       this.clientType = "websocket";
       this.connected = true;
       if (this.appDebugEnabled) {
-        debugRPC("Connected via WebSocket with authentication");
+        this.logger.info("Connected via WebSocket with authentication");
       }
     } catch (wsError) {
       if (this.appDebugEnabled) {
-        debugRPC(`WebSocket connection failed: ${wsError.message}`);
+        this.logger.warn(`WebSocket connection failed: ${wsError.message}`);
       }
       this.logError(
         "WebSocket connection error:",
@@ -93,12 +94,12 @@ class TrueNASClient {
 
   _setupGracefulDegradation() {
     if (this.appDebugEnabled) {
-      debugRPC("Setting up graceful degradation mode for TrueNASClient");
+      this.logger.debug("Setting up graceful degradation mode for TrueNASClient");
     }
 
     this.client = async (method) => {
       if (this.appDebugEnabled) {
-        debugRPC(
+        this.logger.debug(
           `TrueNAS method ${method} called in graceful degradation mode. No API call made.`
         );
       }
@@ -111,7 +112,7 @@ class TrueNASClient {
     this.clientType = "graceful-degradation";
     this.connected = true;
     if (this.appDebugEnabled) {
-      debugRPC("TrueNASClient graceful degradation active.");
+      this.logger.info("TrueNASClient graceful degradation active.");
     }
   }
 
@@ -122,16 +123,16 @@ class TrueNASClient {
 
     try {
       if (this.appDebugEnabled) {
-        debugRPC(`Calling TrueNAS API method: ${method} with params:`, params);
+        this.logger.debug(`Calling TrueNAS API method: ${method} with params:`, params);
       }
       const result = await this.client(method, params);
       if (this.appDebugEnabled) {
-        debugRPC(`Received response for ${method}`);
+        this.logger.debug(`Received response for ${method}`);
       }
       return result;
     } catch (err) {
       if (this.appDebugEnabled) {
-        debugRPC(`Error calling TrueNAS API method ${method}:`, err.message);
+        this.logger.warn(`Error calling TrueNAS API method ${method}:`, err.message);
       }
       this.logError(
         `TrueNAS RPC Error for method '${method}':`,
@@ -145,7 +146,7 @@ class TrueNASClient {
   close() {
     if (this.wsCloseFn) {
       if (this.appDebugEnabled) {
-        debugRPC("Closing TrueNASClient WebSocket connection via wsCloseFn");
+        this.logger.debug("Closing TrueNASClient WebSocket connection via wsCloseFn");
       }
       this.wsCloseFn();
       this.wsCloseFn = null;
@@ -153,7 +154,7 @@ class TrueNASClient {
     this.client = null;
     this.connected = false;
     if (this.appDebugEnabled) {
-      debugRPC("TrueNASClient connection closed and reset.");
+      this.logger.info("TrueNASClient connection closed and reset.");
     }
   }
 }

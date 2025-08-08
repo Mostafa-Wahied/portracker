@@ -4,7 +4,15 @@
  */
 
 const fs = require("fs");
-const debugDiscovery = require("debug")("ports-tracker:truenas:discovery");
+const { Logger } = require('./logger');
+
+// Initialize logger for auto-discovery
+const logger = new Logger("TrueNAS-Discovery", { debug: process.env.DEBUG === 'true' });
+
+// Helper function for debug logging
+function debugDiscovery(message, ...args) {
+  logger.debug(message, ...args);
+}
 
 /**
  * Discover TrueNAS UI configuration via Unix socket
@@ -192,9 +200,37 @@ function detectHostAddresses(options = {}) {
     process.env.DOCKER_HOST || fs.existsSync("/.dockerenv");
 
   if (isContainerEnvironment) {
+    try {
+      const fs = require("fs");
+      if (fs.existsSync("/proc/net/route")) {
+        const routes = fs.readFileSync("/proc/net/route", "utf8");
+        const lines = routes.split("\n");
+        for (const line of lines) {
+          const fields = line.split("\t");
+          if (fields[1] === "00000000" && fields[7] === "00000000") {
+            const gatewayHex = fields[2];
+            const gateway = [
+              parseInt(gatewayHex.substr(6, 2), 16),
+              parseInt(gatewayHex.substr(4, 2), 16),
+              parseInt(gatewayHex.substr(2, 2), 16),
+              parseInt(gatewayHex.substr(0, 2), 16)
+            ].join(".");
+            
+            if (!hostAddresses.includes(gateway)) {
+              hostAddresses.unshift(gateway);
+            }
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      // Fallback silently
+    }
+    
     hostAddresses.push("host.docker.internal");
     hostAddresses.push("172.17.0.1");
   }
+  
   return hostAddresses;
 }
 

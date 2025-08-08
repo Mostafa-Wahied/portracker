@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     sqlite3 \
     procps \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -71,13 +72,13 @@ RUN mkdir -p /data
 WORKDIR /app/backend
 
 # Environment variables
+ENV NODE_ENV=production
 ENV PORT=4999
 ENV DATABASE_PATH=/data/portracker.db
 
 # Volume for data persistence
 VOLUME /data
 
-# Expose port
 EXPOSE 4999
 
 # Health check

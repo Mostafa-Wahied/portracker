@@ -5,6 +5,7 @@
  * a factory method to create the appropriate collector for a platform.
  */
 
+const { Logger } = require("../lib/logger");
 const BaseCollector = require("./base_collector");
 const TrueNASCollector = require("./truenas_collector");
 const DockerCollector = require("./docker_collector");
@@ -35,22 +36,11 @@ function createCollector(platform = "base", config = {}) {
  */
 async function detectCollector(config = {}) {
   const debug = config.debug || false;
-
-  function logInfo(message) {
-    console.log("[Collector] INFO:", message);
-  }
-  function logDebug(...args) {
-    if (debug) {
-      console.log("[Collector] DEBUG:", ...args);
-    }
-  }
-  function logWarn(...args) {
-    console.warn("[Collector] WARN:", ...args);
-  }
+  const logger = new Logger("Collector", { debug });
 
   if (debug) {
-    logDebug("--- detectCollector START ---");
-    logDebug("Collector detection config:", config);
+    logger.debug("--- detectCollector START ---");
+    logger.debug("Collector detection config:", config);
   }
 
   const collectorTypes = ["truenas", "docker", "system"];
@@ -62,45 +52,45 @@ async function detectCollector(config = {}) {
     if (!collectors[type]) continue;
 
     const collector = createCollector(type, { debug });
-    logDebug(`Attempting compatibility check for ${type}...`);
+    logger.debug(`Attempting compatibility check for ${type}...`);
 
     try {
       const score = await collector.isCompatible();
       detectionDetails[type] = score;
 
       if (debug) {
-        logDebug(`Compatibility score for ${type}: ${score}`);
+        logger.debug(`Compatibility score for ${type}: ${score}`);
       }
 
       if (score > highestScore) {
         highestScore = score;
         bestCollector = collector;
-        logDebug(
+        logger.debug(
           `New best collector: ${type} (score: ${score}, previous best: ${highestScore})`
         );
       }
     } catch (err) {
-      logWarn(`Error checking compatibility for ${type}:`, err.message);
+      logger.warn(`Error checking compatibility for ${type}:`, err.message);
       detectionDetails[type] = 0;
     }
   }
 
   if (debug) {
-    logDebug(`Final detection scores:`, detectionDetails);
+    logger.debug(`Final detection scores:`, detectionDetails);
   }
 
   if (bestCollector && highestScore > 0) {
     const message = `Auto-detected ${bestCollector.platform} collector with score ${highestScore}`;
-    logInfo(message);
-    logDebug("--- detectCollector END (returning bestCollector) ---");
+    logger.info(message);
+    logger.debug("--- detectCollector END (returning bestCollector) ---");
     return bestCollector;
   }
 
   const systemCollector = createCollector("system", { debug });
-  logInfo(
+  logger.info(
     "No compatible collector detected with score > 0, using system collector"
   );
-  logDebug("--- detectCollector END (returning system fallback) ---");
+  logger.debug("--- detectCollector END (returning system fallback) ---");
   return systemCollector;
 }
 

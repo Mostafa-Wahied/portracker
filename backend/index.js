@@ -1,7 +1,7 @@
 /**
  * PORTS TRACKER - BACKEND SERVER
  *
- * Production-ready backend server for the Ports Tracker application.
+ * Production-ready backend server for the portracker application.
  * Provides RESTful API endpoints for server management, port scanning,
  * and system monitoring across multiple deployment platforms.
  */
@@ -10,88 +10,462 @@ const express = require("express");
 const cors = require("cors");
 const db = require("./db");
 const { createCollector, detectCollector } = require("./collectors");
+const { Logger } = require("./lib/logger");
 const path = require("path");
 const net = require("net");
 const http = require("http");
 const https = require("https");
-// const fetch = require("node-fetch");
+const fs = require("fs");
+const os = require("os");
+
+// Initialize logger for this component
+const logger = new Logger("Server", { debug: process.env.DEBUG === 'true' });
 
 const PING_TIMEOUT = 2000;
 
-async function testProtocol(scheme, host_ip, port, path = "/") {
-  const client = scheme === "https" ? https : http;
-  const options = {
-    hostname: host_ip,
-    port,
-    path,
-    timeout: PING_TIMEOUT,
-    family: 4,
-  };
-  if (scheme === "https") options.rejectUnauthorized = false;
+// Rate limiting for ping debug logs to prevent spam
+const pingDebugStats = {
+  count: 0,
+  startTime: Date.now(),
+  lastSummaryTime: Date.now()
+};
 
+function logPingDebug(message, force = false) {
+  pingDebugStats.count++;
+  const now = Date.now();
+  
+  // Log first few pings, then summary every 30 seconds
+  if (pingDebugStats.count <= 5 || force || (now - pingDebugStats.lastSummaryTime) > 30000) {
+    logger.debug(message);
+    
+    if ((now - pingDebugStats.lastSummaryTime) > 30000) {
+      const elapsed = (now - pingDebugStats.startTime) / 1000;
+      logger.debug(`[PING SUMMARY] ${pingDebugStats.count} pings processed in ${elapsed.toFixed(1)}s`);
+      pingDebugStats.lastSummaryTime = now;
+    }
+  }
+}
+
+const WELL_KNOWN_PORTS = {
+  22: { name: 'SSH', type: 'system', description: 'Secure Shell (SSH)' },
+  23: { name: 'Telnet', type: 'system', description: 'Telnet protocol' },
+  25: { name: 'SMTP', type: 'system', description: 'Simple Mail Transfer Protocol (SMTP)' },
+  53: { name: 'DNS', type: 'system', description: 'Domain Name System (DNS)' },
+  80: { name: 'HTTP', type: 'web', description: 'Hypertext Transfer Protocol (HTTP)' },
+  110: { name: 'POP3', type: 'system', description: 'Post Office Protocol version 3 (POP3)' },
+  143: { name: 'IMAP', type: 'system', description: 'Internet Message Access Protocol (IMAP)' },
+  443: { name: 'HTTPS', type: 'web', description: 'HTTP Secure (HTTPS)' },
+  993: { name: 'IMAPS', type: 'system', description: 'IMAP over SSL' },
+  995: { name: 'POP3S', type: 'system', description: 'POP3 over SSL' },
+  1433: { name: 'SQL Server', type: 'database', description: 'Microsoft SQL Server database' },
+  3306: { name: 'MySQL', type: 'database', description: 'MySQL database' },
+  5432: { name: 'PostgreSQL', type: 'database', description: 'PostgreSQL database' },
+  6379: { name: 'Redis', type: 'database', description: 'Redis in-memory database' },
+  8080: { name: 'HTTP Alt', type: 'web', description: 'HTTP alternative port' },
+  8443: { name: 'HTTPS Alt', type: 'web', description: 'HTTPS alternative port' },
+  9000: { name: 'Management', type: 'web', description: 'Common management interface port' },
+};
+
+function detectServiceType(port, owner) {
+  const portNum = parseInt(port, 10);
+  
+  if (WELL_KNOWN_PORTS[portNum]) {
+    return WELL_KNOWN_PORTS[portNum];
+  }
+  
+  if (owner && typeof owner === 'string') {
+    const ownerLower = owner.toLowerCase();
+    
+    if (ownerLower.includes('ssh') || ownerLower.includes('sshd')) {
+      return { name: 'SSH', type: 'system', description: 'SSH service' };
+    }
+    if (ownerLower.includes('nginx') || ownerLower.includes('apache') || ownerLower.includes('httpd')) {
+      return { name: 'Web Server', type: 'web', description: 'Web server' };
+    }
+    if (ownerLower.includes('mysql') || ownerLower.includes('postgres') || ownerLower.includes('redis')) {
+      return { name: 'Database', type: 'database', description: 'Database service' };
+    }
+  }
+  
+  // Enhanced port range detection for web services
+  if (portNum === 80 || portNum === 443 || portNum === 8080 || portNum === 8443 || 
+      (portNum >= 3000 && portNum <= 3999) ||  // Common dev ports
+      (portNum >= 4000 && portNum <= 4999) ||  // Common app ports
+      (portNum >= 8000 && portNum <= 8999) ||  // Common web alt ports
+      (portNum >= 9000 && portNum <= 9999)) {  // Management/admin ports
+    return { name: 'Web Service', type: 'web', description: 'Web service' };
+  }
+  
+  if (portNum < 1024) {
+    return { name: 'System Service', type: 'system', description: 'System service' };
+  }
+  
+  return { name: 'Service', type: 'service', description: 'Application service' };
+}
+
+function getDockerHostIP() {
+  const platform = os.platform();
+  
+  if (platform === 'darwin' || platform === 'win32') {
+    return "host.docker.internal";
+  }
+  
+  if (isDockerDesktopEnvironment()) {
+    return "host.docker.internal";
+  }
+  
   try {
-    const headRes = await new Promise((resolve, reject) => {
-      const req = client.request({ ...options, method: "HEAD" }, (res) => {
-        res.resume();
-        resolve(res);
+    if (fs.existsSync('/proc/net/route')) {
+      const routes = fs.readFileSync('/proc/net/route', 'utf8');
+      const lines = routes.split('\n');
+      for (const line of lines) {
+        const fields = line.split('\t');
+        if (fields[1] === '00000000' && fields[7] === '00000000') {
+          const gatewayHex = fields[2];
+          const gateway = [
+            parseInt(gatewayHex.substr(6, 2), 16),
+            parseInt(gatewayHex.substr(4, 2), 16),
+            parseInt(gatewayHex.substr(2, 2), 16),
+            parseInt(gatewayHex.substr(0, 2), 16)
+          ].join('.');
+          return gateway;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn('Failed to detect Docker host IP from /proc/net/route:', err.message);
+  }
+  
+  return "172.17.0.1";
+}
+
+function isDockerDesktopEnvironment() {
+  try {
+    if (process.env.DOCKER_DESKTOP === 'true') {
+      return true;
+    }
+    
+    if (fs.existsSync('/proc/version')) {
+      const version = fs.readFileSync('/proc/version', 'utf8');
+      if (version.includes('linuxkit') || version.includes('docker-desktop')) {
+        return true;
+      }
+    }
+    
+    if (fs.existsSync('/proc/net/route')) {
+      const routes = fs.readFileSync('/proc/net/route', 'utf8');
+      const gatewayLines = routes.split('\n').filter(line => {
+        const fields = line.split('\t');
+        return fields[1] === '00000000';
       });
-      req.on("timeout", () => {
-        req.destroy();
-        reject(new Error("timeout"));
+      
+      for (const line of gatewayLines) {
+        const fields = line.split('\t');
+        const gatewayHex = fields[2];
+        const gateway = [
+          parseInt(gatewayHex.substr(6, 2), 16),
+          parseInt(gatewayHex.substr(4, 2), 16),
+          parseInt(gatewayHex.substr(2, 2), 16),
+          parseInt(gatewayHex.substr(0, 2), 16)
+        ].join('.');
+        
+        if (gateway.startsWith('192.168.65.') || gateway.startsWith('172.19.') || gateway.startsWith('172.20.')) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  } catch (err) {
+    return false;
+  }
+}
+
+async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = false) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PING_TIMEOUT);
+  
+  const url = `${scheme}://${host_ip}:${port}${path}`;
+  
+  try {
+    const startTime = Date.now();
+    
+    try {
+      const headResponse = await fetch(url, {
+        method: 'HEAD',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'PortTracker/1.0',
+        },
       });
-      req.on("error", reject);
-      req.end();
-    });
-    if (headRes.statusCode >= 200 && headRes.statusCode < 300)
-      return { success: true, statusCode: headRes.statusCode };
-    if (
-      headRes.statusCode >= 300 &&
-      headRes.statusCode < 400 &&
-      headRes.headers.location
-    )
+      
+      const duration = Date.now() - startTime;
+      
+      if (isDebugEnabled) {
+        logPingDebug(
+          `testProtocol HEAD ${url} -> ${headResponse.status} (${duration}ms)`
+        );
+      }
+      
+      if (headResponse.status < 500 && headResponse.status !== 404) {
+        clearTimeout(timeout);
+        return {
+          reachable: true,
+          statusCode: headResponse.status,
+          protocol: scheme,
+          method: 'HEAD',
+          responseTime: duration,
+        };
+      }
+    } catch (headError) {
+      if (isDebugEnabled) {
+        logPingDebug(
+          `testProtocol HEAD ${url} failed: ${headError.message}`
+        );
+      }
+    }
+    
+    try {
+      const getStartTime = Date.now();
+      const getResponse = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'PortTracker/1.0',
+        },
+        redirect: 'manual'
+      });
+      
+      const getDuration = Date.now() - getStartTime;
+      
+      if (isDebugEnabled) {
+        logPingDebug(
+          `testProtocol GET ${url} -> ${getResponse.status} (${getDuration}ms)`
+        );
+      }
+      
+      if (getResponse.status < 500) {
+        let isSPA = false;
+        
+        if (getResponse.status === 404) {
+          try {
+            const body = await getResponse.text();
+            const contentType = getResponse.headers.get('content-type') || '';
+            
+            if (contentType.includes('text/html') && body.length > 100) {
+              const hasDoctype = body.toLowerCase().includes('<!doctype html>') || body.toLowerCase().includes('<html');
+              const hasScriptTags = body.toLowerCase().includes('<script');
+              const hasMetaTags = body.toLowerCase().includes('<meta');
+              const hasAppRoot = body.includes('id="root"') || body.includes('id="app"') || body.includes('id=\'root\'') || body.includes('id=\'app\'');
+              
+              isSPA = hasDoctype && hasScriptTags && (hasAppRoot || hasMetaTags);
+              
+              if (isDebugEnabled && isSPA) {
+                logPingDebug(
+                  `testProtocol detected SPA pattern in 404 response for ${url}`
+                );
+              }
+            }
+          } catch (bodyError) {
+            if (isDebugEnabled) {
+              logPingDebug(
+                `testProtocol failed to read body for SPA detection: ${bodyError.message}`
+              );
+            }
+          }
+        }
+        
+        clearTimeout(timeout);
+        return {
+          reachable: true,
+          statusCode: getResponse.status,
+          protocol: scheme,
+          method: 'GET',
+          responseTime: getDuration,
+          isSPA: isSPA
+        };
+      }
+    } catch (getError) {
+      if (isDebugEnabled) {
+        logPingDebug(
+          `testProtocol GET ${url} failed: ${getError.message}`
+        );
+      }
+    }
+    
+    clearTimeout(timeout);
+    return { reachable: false, error: 'No successful response' };
+    
+  } catch (error) {
+    clearTimeout(timeout);
+    return { reachable: false, error: error.message };
+  }
+}
+
+function determineServiceStatus(serviceInfo, httpsResponse, httpResponse) {
+  const serviceType = serviceInfo.type;
+  
+  if (serviceType === 'system') {
+    return {
+      status: 'system',
+      color: 'gray',
+      title: `${serviceInfo.name} - System service`,
+      description: serviceInfo.description
+    };
+  }
+  
+  let workingResponse = null;
+  
+  if (httpsResponse.reachable && httpsResponse.statusCode >= 200 && httpsResponse.statusCode < 300) {
+    workingResponse = httpsResponse;
+  } else if (httpResponse.reachable && httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
+    workingResponse = httpResponse;
+  } else if (httpsResponse.reachable) {
+    workingResponse = httpsResponse;
+  } else if (httpResponse.reachable) {
+    workingResponse = httpResponse;
+  }
+  
+  if (!workingResponse) {
+    return {
+      status: 'unreachable',
+      color: 'red',
+      title: `${serviceInfo.name} - Service not reachable`,
+      description: serviceInfo.description
+    };
+  }
+  
+  if (serviceType === 'web') {
+    const statusCode = workingResponse.statusCode;
+    
+    if (statusCode >= 200 && statusCode < 400) {
       return {
-        success: true,
-        statusCode: headRes.statusCode,
-        redirected: true,
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web service accessible`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
       };
-  } catch (headError) {
-    if (debug || (headError && headError.message !== "timeout")) {
-      console.log(
-        `[Server] DEBUG: testProtocol HEAD ${scheme}://${host_ip}:${port}${path} failed: ${headError.message}`
-      );
+    }
+    
+    if (statusCode === 401) {
+      return {
+        status: 'accessible',
+        color: 'green', 
+        title: `${serviceInfo.name} - Web accessible (auth)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 403) {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Listening (Forbidden)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 405 && workingResponse.method === 'HEAD') {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web accessible (GET)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 404) {
+      if (workingResponse.isSPA) {
+        return {
+          status: 'accessible',
+          color: 'green',
+          title: `${serviceInfo.name} - Web accessible`,
+          description: serviceInfo.description,
+          protocol: workingResponse.protocol
+        };
+      } else {
+        return {
+          status: 'listening',
+          color: 'yellow',
+          title: `${serviceInfo.name} - Listening (no web UI)`,
+          description: serviceInfo.description,
+          protocol: workingResponse.protocol
+        };
+      }
+    }
+    
+    if (statusCode >= 400 && statusCode < 500) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web accessible (HTTP ${statusCode})`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode >= 500) {
+      return {
+        status: 'error',
+        color: 'red',
+        title: `${serviceInfo.name} - HTTP ${statusCode} error`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
     }
   }
-
-  try {
-    const getRes = await new Promise((resolve, reject) => {
-      const req = client.request({ ...options, method: "GET" }, (res) => {
-        res.resume();
-        resolve(res);
-      });
-      req.on("timeout", () => {
-        req.destroy();
-        reject(new Error("timeout"));
-      });
-      req.on("error", reject);
-      req.end();
-    });
-    if (getRes.statusCode >= 200 && getRes.statusCode < 300)
-      return { success: true, statusCode: getRes.statusCode };
-    if (
-      getRes.statusCode >= 300 &&
-      getRes.statusCode < 400 &&
-      getRes.headers.location
-    )
-      return { success: true, statusCode: getRes.statusCode, redirected: true };
-    return { success: false, statusCode: getRes.statusCode };
-  } catch (getError) {
-    if (debug || (getError && getError.message !== "timeout")) {
-      console.log(
-        `[Server] DEBUG: testProtocol GET ${scheme}://${host_ip}:${port}${path} failed: ${getError.message}`
-      );
+  
+  if (serviceType === 'database' || serviceType === 'service') {
+    const statusCode = workingResponse.statusCode;
+    
+    if (statusCode === 401) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - HTTP accessible (auth)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
     }
-    return { success: false, reason: getError.message };
+    
+    if (statusCode === 403) {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Listening (Forbidden)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode < 500) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - HTTP accessible`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    } else {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Service listening (not HTTP)`,
+        description: serviceInfo.description
+      };
+    }
   }
+  
+  return {
+    status: 'listening',
+    color: 'yellow',
+    title: `${serviceInfo.name} - Service listening`,
+    description: serviceInfo.description
+  };
 }
 
 // Verify database schema before starting the server
@@ -100,22 +474,19 @@ try {
   const columnNames = columns.map((col) => col.name);
 
   if (!columnNames.includes("type")) {
-    console.warn(
-      '[Server] WARN: Database schema migration may be needed. The "servers" table "type" column is missing.'
+    logger.warn(
+      'Database schema migration may be needed. The "servers" table "type" column is missing.'
     );
-    console.warn(
-      "[Server] WARN: This might affect functionality. Consider checking database setup or migrations."
+    logger.warn(
+      "This might affect functionality. Consider checking database setup or migrations."
     );
   } else {
-    console.log("[Server] INFO: Database schema verification successful.");
+    logger.info("Database schema verification successful.");
   }
   db.ensureLocalServer(process.env.PORT || 3000);
 } catch (error) {
-  console.error(
-    "[Server] FATAL: Database verification failed:",
-    error.message,
-    error.stack || ""
-  );
+  logger.fatal("Database verification failed:", error.message);
+  logger.debug("Stack trace:", error.stack || "");
 }
 
 const app = express();
@@ -128,10 +499,12 @@ let debug = false;
  * Get all ports from local system using collector framework.
  */
 app.get("/api/ports", async (req, res) => {
-  debug = req.query.debug === "true";
-  if (debug) {
-    console.log(`[Server] DEBUG: GET /api/ports called with debug=${debug}`);
-  }
+  const debug = req.query.debug === "true";
+  // Enable debug for this request if specified
+  if (debug) logger.setDebugEnabled(true);
+  
+  logger.debug(`GET /api/ports called with debug=${debug}`);
+  
   try {
     const entries = [];
     const dockerCollector = createCollector("docker", { debug });
@@ -169,14 +542,14 @@ app.get("/api/ports", async (req, res) => {
       }))
     );
   } catch (error) {
-    console.error(
-      "[Server] ERROR: Error in GET /api/ports:",
-      error.message,
-      error.stack || ""
-    );
+    logger.error("Error in GET /api/ports:", error.message);
+    logger.debug("Stack trace:", error.stack || "");
     res
       .status(500)
       .json({ error: "Failed to scan ports", details: error.message });
+  } finally {
+
+    if (debug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
@@ -184,12 +557,12 @@ app.get("/api/ports", async (req, res) => {
  * New peer-based endpoint to replace remote API connectivity
  */
 app.get("/api/all-ports", async (req, res) => {
-  debug = req.query.debug === "true";
-  if (debug) {
-    console.log(
-      `[Server] DEBUG: GET /api/all-ports called with debug=${debug}`
-    );
-  }
+  const debug = req.query.debug === "true";
+  // Enable debug for this request if specified
+  if (debug) logger.setDebugEnabled(true);
+  
+  logger.debug(`GET /api/all-ports called with debug=${debug}`);
+  
   try {
     const servers = db.prepare("SELECT * FROM servers").all();
 
@@ -210,10 +583,7 @@ app.get("/api/all-ports", async (req, res) => {
         localServerResult.data = localPorts;
         localServerResult.ok = true;
       } catch (localError) {
-        console.error(
-          "[Server] ERROR: Failed to get local ports for /api/all-ports:",
-          localError.message
-        );
+        logger.error("Failed to get local ports for /api/all-ports:", localError.message);
         localServerResult.ok = false;
         localServerResult.error = `Failed to collect local ports: ${localError.message}`;
       }
@@ -221,14 +591,14 @@ app.get("/api/all-ports", async (req, res) => {
 
     res.json(results);
   } catch (error) {
-    console.error(
-      "[Server] ERROR: Error in GET /api/all-ports:",
-      error.message,
-      error.stack || ""
-    );
+    logger.error("Error in GET /api/all-ports:", error.message);
+    logger.debug("Stack trace:", error.stack || "");
     res
       .status(500)
       .json({ error: "Failed to process all ports", details: error.message });
+  } finally {
+
+    if (debug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
@@ -236,37 +606,21 @@ app.get("/api/all-ports", async (req, res) => {
  * Get local ports using the best available collector
  */
 async function getLocalPortsUsingCollectors(options = {}) {
-  const currentDebug = options.debug || debug;
+  const currentDebug = options.debug || false;
 
   try {
-    if (currentDebug) {
-      console.log(
-        "[Server] DEBUG: [getLocalPortsUsingCollectors] Starting port collection..."
-      );
-    }
+    logger.debug("[getLocalPortsUsingCollectors] Starting port collection...");
 
     const collector = await detectCollector({ debug: currentDebug });
-    if (currentDebug) {
-      console.log(
-        `[Server] DEBUG: [getLocalPortsUsingCollectors] Detected collector: ${collector?.platform}`
-      );
-    }
+    logger.debug(`[getLocalPortsUsingCollectors] Detected collector: ${collector?.platform}`);
 
     const ports = await collector.getPorts();
-    if (currentDebug) {
-      console.log(
-        `[Server] DEBUG: [getLocalPortsUsingCollectors] Collected ${
-          ports?.length || 0
-        } ports.`
-      );
-    }
+    logger.debug(`[getLocalPortsUsingCollectors] Collected ${ports?.length || 0} ports.`);
+    
     return ports;
   } catch (error) {
-    console.error(
-      "[Server] ERROR: [getLocalPortsUsingCollectors] Primary collection attempt failed:",
-      error.message,
-      error.stack || ""
-    );
+    logger.error("[getLocalPortsUsingCollectors] Primary collection attempt failed:", error.message);
+    logger.debug("Stack trace:", error.stack || "");
     throw error;
   }
 }
@@ -276,12 +630,12 @@ async function getLocalPortsUsingCollectors(options = {}) {
  */
 app.get("/api/servers/:id/scan", async (req, res) => {
   const serverId = req.params.id;
-  const currentDebug = req.query.debug === "true" || debug;
-  if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: GET /api/servers/${serverId}/scan called with debug=${currentDebug}`
-    );
-  }
+  const currentDebug = req.query.debug === "true";
+  
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
+  
+  logger.debug(`GET /api/servers/${serverId}/scan called with debug=${currentDebug}`);
 
   try {
     const server = db
@@ -289,9 +643,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
       .get(serverId);
 
     if (!server) {
-      console.warn(
-        `[Server] WARN: [GET /api/servers/${serverId}/scan] Server not found.`
-      );
+      logger.warn(`[GET /api/servers/${serverId}/scan] Server not found.`);
       return res.status(404).json({ error: "Server not found" });
     }
 
@@ -299,11 +651,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
       const platformType = server.platform_type || "auto";
       let collector;
 
-      if (currentDebug) {
-        console.log(
-          `[Server] DEBUG: [GET /api/servers/local/scan] Local server platform_type: ${platformType}`
-        );
-      }
+      logger.debug(`[GET /api/servers/local/scan] Local server platform_type: ${platformType}`);
 
       if (platformType === "auto") {
         collector = await detectCollector({ debug: currentDebug });
@@ -341,8 +689,8 @@ app.get("/api/servers/:id/scan", async (req, res) => {
       ) {
         db.updateLocalServerPlatformType(collectData.platform);
       }
-      console.log(
-        `[Server] INFO: [GET /api/servers/local/scan] Successfully scanned. Collector: ${
+      logger.debug(
+        `Local scan complete. Collector: ${
           collector?.platform
         }, Apps: ${collectData.apps?.length || 0}, Ports: ${
           collectData.ports?.length || 0
@@ -352,18 +700,11 @@ app.get("/api/servers/:id/scan", async (req, res) => {
     }
 
     if (server.type === "peer" && server.url) {
-      if (currentDebug) {
-        console.log(
-          `[Server] DEBUG: [GET /api/servers/${serverId}/scan] Attempting to scan remote peer at URL: ${server.url}`
-        );
-      }
+      logger.debug(`[GET /api/servers/${serverId}/scan] Attempting to scan remote peer at URL: ${server.url}`);
+      
       try {
         const peerScanUrl = new URL("/api/servers/local/scan", server.url).href;
-        if (currentDebug) {
-          console.log(
-            `[Server] DEBUG: [GET /api/servers/${serverId}/scan] Fetching from peer URL: ${peerScanUrl}`
-          );
-        }
+        logger.debug(`[GET /api/servers/${serverId}/scan] Fetching from peer URL: ${peerScanUrl}`);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -381,8 +722,8 @@ app.get("/api/servers/:id/scan", async (req, res) => {
             } catch (e) {
               /* ignore */
             }
-            console.warn(
-              `[Server] WARN: [GET /api/servers/${serverId}/scan] Peer server at ${server.url} responded with status ${peerResponse.status}. Body: ${errorBody}`
+            logger.warn(
+              `[GET /api/servers/${serverId}/scan] Peer server at ${server.url} responded with status ${peerResponse.status}. Body: ${errorBody}`
             );
             return res.status(peerResponse.status).json({
               error: `Peer server scan failed with status ${peerResponse.status}`,
@@ -393,20 +734,13 @@ app.get("/api/servers/:id/scan", async (req, res) => {
           }
 
           const peerScanData = await peerResponse.json();
-          if (currentDebug) {
-            console.log(
-              `[Server] DEBUG: [GET /api/servers/${serverId}/scan] Successfully received scan data from peer ${serverId}`
-            );
-          }
-          console.log(
-            `[Server] INFO: [GET /api/servers/${serverId}/scan] Successfully scanned remote peer. Peer: ${server.label} (${serverId})`
-          );
+          logger.debug(`Peer scan complete: ${server.label} (${serverId})`);
           return res.json(peerScanData);
         } catch (fetchError) {
           clearTimeout(timeoutId);
           if (fetchError.name === 'AbortError') {
-            console.error(
-              `[Server] ERROR: [GET /api/servers/${serverId}/scan] Timeout after 15s communicating with peer ${server.label} at ${server.url}`
+            logger.error(
+              `[GET /api/servers/${serverId}/scan] Timeout after 15s communicating with peer ${server.label} at ${server.url}`
             );
             return res.status(408).json({
               error: "Request timeout - peer server took too long to respond",
@@ -418,9 +752,8 @@ app.get("/api/servers/:id/scan", async (req, res) => {
           throw fetchError;
         }
       } catch (fetchError) {
-        console.error(
-          `[Server] ERROR: [GET /api/servers/${serverId}/scan] Failed to fetch scan data from peer ${server.label} at ${server.url}:`,
-          fetchError.message
+        logger.error(
+          `[GET /api/servers/${serverId}/scan] Failed to fetch scan data from peer ${server.label} at ${server.url}: ${fetchError.message}`
         );
         return res.status(502).json({
           error: "Failed to communicate with peer server",
@@ -430,8 +763,8 @@ app.get("/api/servers/:id/scan", async (req, res) => {
         });
       }
     } else {
-      console.warn(
-        `[Server] WARN: [GET /api/servers/${serverId}/scan] Cannot scan server: Not 'local' and not a valid 'peer' with a URL.`
+      logger.warn(
+        `[GET /api/servers/${serverId}/scan] Cannot scan server: Not 'local' and not a valid 'peer' with a URL.`
       );
       return res.status(501).json({
         error:
@@ -440,14 +773,14 @@ app.get("/api/servers/:id/scan", async (req, res) => {
       });
     }
   } catch (error) {
-    console.error(
-      `[Server] ERROR: Error in GET /api/servers/${serverId}/scan:`,
-      error.message,
-      error.stack || ""
-    );
+    logger.error(`Error in GET /api/servers/${serverId}/scan: ${error.message}`);
+    logger.debug("Stack trace:", error.stack || "");
     res
       .status(500)
       .json({ error: "Failed to scan server", details: error.message });
+  } finally {
+
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
@@ -564,22 +897,17 @@ function validateServerIdParam(req, res, next) {
 }
 
 app.get("/api/servers", (req, res) => {
-  console.log("[Server] INFO: Received GET /api/servers request");
+  logger.debug("GET /api/servers");
   try {
     const stmt = db.prepare(
       "SELECT id, label, url, parentId, type, unreachable, platform_type FROM servers"
     );
     const servers = stmt.all();
-    console.log(
-      `[Server] INFO: Sending ${servers.length} servers in /api/servers response`
-    );
+    logger.debug(`Returning ${servers.length} servers`);
     res.json(servers);
   } catch (error) {
-    console.error(
-      "[Server] ERROR: Failed to get servers:",
-      error.message,
-      error.stack || ""
-    );
+    logger.error("Failed to get servers:", error.message);
+    logger.debug("Stack trace:", error.stack || "");
     res
       .status(500)
       .json({ error: "Failed to retrieve servers", details: error.message });
@@ -620,9 +948,7 @@ app.post("/api/servers", validateServerInput, (req, res) => {
         platform_type,
         id
       );
-      console.log(
-        `[Server] INFO: Server updated successfully. ID: ${id}, Label: "${label}"`
-      );
+      logger.info(`Server updated successfully. ID: ${id}, Label: "${label}"`);
       res.status(200).json({ message: "Server updated successfully", id });
     } else {
       db.prepare(
@@ -636,17 +962,12 @@ app.post("/api/servers", validateServerInput, (req, res) => {
         dbUnreachable,
         platform_type
       );
-      console.log(
-        `[Server] INFO: Server added successfully. ID: ${id}, Label: "${label}"`
-      );
+      logger.info(`Server added successfully. ID: ${id}, Label: "${label}"`);
       res.status(201).json({ message: "Server added successfully", id });
     }
   } catch (error) {
-    console.error(
-      `[Server] ERROR: Database error in POST /api/servers (ID: ${id}):`,
-      error.message,
-      error.stack || ""
-    );
+    logger.error(`Database error in POST /api/servers (ID: ${id}): ${error.message}`);
+    logger.debug("Stack trace:", error.stack || "");
     if (error.message.includes("UNIQUE constraint failed")) {
       return res
         .status(409)
@@ -656,10 +977,8 @@ app.post("/api/servers", validateServerInput, (req, res) => {
       error.message.toLowerCase().includes("can only bind") ||
       error.message.toLowerCase().includes("datatype mismatch")
     ) {
-      console.error(
-        `[Server] ERROR DETAIL: Possible data binding/type issue for server ID ${id}. Payload received: ${JSON.stringify(
-          req.body
-        )}`
+      logger.error(
+        `Possible data binding/type issue for server ID ${id}. Payload received: ${JSON.stringify(req.body)}`
       );
       return res
         .status(500)
@@ -676,31 +995,26 @@ app.post("/api/servers", validateServerInput, (req, res) => {
 
 app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
   const serverId = req.params.id;
-  const currentDebug = req.query.debug === "true" || debug;
+  const currentDebug = req.query.debug === "true";
+  
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
 
-  if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: [DELETE /api/servers/${serverId}] Request received.`
-    );
-  }
+  logger.debug(`[DELETE /api/servers/${serverId}] Request received.`);
 
   try {
     const server = db
       .prepare("SELECT id, label FROM servers WHERE id = ?")
       .get(serverId);
     if (!server) {
-      console.warn(
-        `[Server] WARN: [DELETE /api/servers/${serverId}] Attempt to delete non-existent server.`
-      );
+      logger.warn(`[DELETE /api/servers/${serverId}] Attempt to delete non-existent server.`);
       return res
         .status(404)
         .json({ error: "Server not found", server_id: serverId });
     }
 
     if (serverId === "local") {
-      console.warn(
-        `[Server] WARN: [DELETE /api/servers/${serverId}] Attempt to delete 'local' server.`
-      );
+      logger.warn(`[DELETE /api/servers/${serverId}] Attempt to delete 'local' server.`);
       return res
         .status(400)
         .json({ error: "Cannot delete local server", server_id: serverId });
@@ -716,20 +1030,15 @@ app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
     });
     deleteTransaction();
 
-    console.log(
-      `[Server] INFO: Server deleted successfully. ID: ${serverId}, Label: "${server.label}"`
-    );
+    logger.info(`Server deleted successfully. ID: ${serverId}, Label: "${server.label}"`);
     res.json({
       success: true,
       message: `Server '${server.label}' (ID: ${serverId}) deleted successfully`,
     });
   } catch (err) {
     if (err.message.includes("FOREIGN KEY constraint failed")) {
-      console.error(
-        `[Server] ERROR: FOREIGN KEY constraint failed during DELETE /api/servers/${serverId}:`,
-        err.message,
-        err.stack || ""
-      );
+      logger.error(`FOREIGN KEY constraint failed during DELETE /api/servers/${serverId}: ${err.message}`);
+      logger.debug("Stack trace:", err.stack || "");
       return res.status(409).json({
         error: "Conflict deleting server",
         details:
@@ -737,11 +1046,8 @@ app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
         rawError: err.message,
       });
     }
-    console.error(
-      `[Server] ERROR: Database error in DELETE /api/servers/${serverId}:`,
-      err.message,
-      err.stack || ""
-    );
+    logger.error(`Database error in DELETE /api/servers/${serverId}: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
     res
       .status(500)
       .json({
@@ -749,19 +1055,21 @@ app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
         details: "Unable to delete server",
         rawError: err.message,
       });
+  } finally {
+
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
 app.post("/api/notes", validateNoteInput, (req, res) => {
   const { server_id, host_ip, host_port, note } = req.body;
-  const currentDebug = req.query.debug === "true" || debug;
+  const currentDebug = req.query.debug === "true";
   const noteTrimmed = note ? note.trim() : "";
 
-  if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: POST /api/notes for ${server_id} ${host_ip}:${host_port}. Note: "${noteTrimmed}"`
-    );
-  }
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`POST /api/notes for ${server_id} ${host_ip}:${host_port}. Note: "${noteTrimmed}"`);
 
   try {
     const existing = db
@@ -774,48 +1082,43 @@ app.post("/api/notes", validateNoteInput, (req, res) => {
         db.prepare(
           "DELETE FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ?"
         ).run(server_id, host_ip, host_port);
-        console.log(
-          `[Server] INFO: Note deleted for ${server_id} ${host_ip}:${host_port}`
-        );
+        logger.info(`Note deleted for ${server_id} ${host_ip}:${host_port}`);
       } else {
         db.prepare(
           "UPDATE notes SET note = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ?"
         ).run(noteTrimmed, server_id, host_ip, host_port);
-        console.log(
-          `[Server] INFO: Note updated for ${server_id} ${host_ip}:${host_port}`
-        );
+        logger.info(`Note updated for ${server_id} ${host_ip}:${host_port}`);
       }
     } else if (noteTrimmed !== "") {
       db.prepare(
         "INSERT INTO notes (server_id, host_ip, host_port, note) VALUES (?, ?, ?, ?)"
       ).run(server_id, host_ip, host_port, noteTrimmed);
-      console.log(
-        `[Server] INFO: Note created for ${server_id} ${host_ip}:${host_port}`
-      );
+      logger.info(`Note created for ${server_id} ${host_ip}:${host_port}`);
     }
     res.status(200).json({ success: true, message: "Note saved successfully" });
   } catch (err) {
-    console.error(
-      `[Server] ERROR: Database error in POST /api/notes:`,
-      err.message,
-      err.stack || ""
-    );
+    logger.error(`Database error in POST /api/notes: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
     res
       .status(500)
       .json({
         error: "Database operation failed",
         details: "Unable to save note",
       });
+  } finally {
+
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
 app.get("/api/notes", (req, res) => {
   const { server_id } = req.query;
-  const currentDebug = req.query.debug === "true" || debug;
+  const currentDebug = req.query.debug === "true";
 
-  if (currentDebug) {
-    console.log(`[Server] DEBUG: GET /api/notes for server_id: ${server_id}`);
-  }
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`GET /api/notes for server_id: ${server_id}`);
 
   if (!server_id) {
     return res
@@ -829,29 +1132,28 @@ app.get("/api/notes", (req, res) => {
       .all(server_id);
     res.json(notes);
   } catch (err) {
-    console.error(
-      `[Server] ERROR: Database error in GET /api/notes:`,
-      err.message,
-      err.stack || ""
-    );
+    logger.error(`Database error in GET /api/notes: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
     res
       .status(500)
       .json({
         error: "Database operation failed",
         details: "Unable to retrieve notes",
       });
+  } finally {
+
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
 app.post("/api/ignores", (req, res) => {
   const { server_id, host_ip, host_port, ignored } = req.body;
-  const currentDebug = req.query.debug === "true" || debug;
+  const currentDebug = req.query.debug === "true";
 
-  if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: POST /api/ignores for ${server_id} ${host_ip}:${host_port}. Ignored: ${ignored}`
-    );
-  }
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`POST /api/ignores for ${server_id} ${host_ip}:${host_port}. Ignored: ${ignored}`);
 
   if (
     !server_id ||
@@ -878,53 +1180,44 @@ app.post("/api/ignores", (req, res) => {
         db.prepare(
           "INSERT INTO ignores (server_id, host_ip, host_port) VALUES (?, ?, ?)"
         ).run(server_id, host_ip, host_port);
-        console.log(
-          `[Server] INFO: Port ignored for ${server_id} ${host_ip}:${host_port}`
-        );
+        logger.info(`Port ignored for ${server_id} ${host_ip}:${host_port}`);
       } else {
-        if (currentDebug)
-          console.log(
-            `[Server] DEBUG: Port already ignored for ${server_id} ${host_ip}:${host_port}, no change.`
-          );
+        logger.debug(`Port already ignored for ${server_id} ${host_ip}:${host_port}, no change.`);
       }
     } else {
       if (existing) {
         db.prepare(
           "DELETE FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ?"
         ).run(server_id, host_ip, host_port);
-        console.log(
-          `[Server] INFO: Port un-ignored for ${server_id} ${host_ip}:${host_port}`
-        );
+        logger.info(`Port un-ignored for ${server_id} ${host_ip}:${host_port}`);
       } else {
-        if (currentDebug)
-          console.log(
-            `[Server] DEBUG: Port already not ignored for ${server_id} ${host_ip}:${host_port}, no change.`
-          );
+        logger.debug(`Port already not ignored for ${server_id} ${host_ip}:${host_port}, no change.`);
       }
     }
     res.status(200).json({ success: true, message: "Ignore status updated" });
   } catch (err) {
-    console.error(
-      `[Server] ERROR: Database error in POST /api/ignores:`,
-      err.message,
-      err.stack || ""
-    );
+    logger.error(`Database error in POST /api/ignores: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
     res
       .status(500)
       .json({
         error: "Database operation failed",
         details: "Unable to update ignore status",
       });
+  } finally {
+
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
 app.get("/api/ignores", (req, res) => {
   const { server_id } = req.query;
-  const currentDebug = req.query.debug === "true" || debug;
+  const currentDebug = req.query.debug === "true";
 
-  if (currentDebug) {
-    console.log(`[Server] DEBUG: GET /api/ignores for server_id: ${server_id}`);
-  }
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`GET /api/ignores for server_id: ${server_id}`);
 
   if (!server_id) {
     return res
@@ -938,24 +1231,27 @@ app.get("/api/ignores", (req, res) => {
       .all(server_id);
     res.json(ignores.map((item) => ({ ...item, ignored: true })));
   } catch (err) {
-    console.error(
-      `[Server] ERROR: Database error in GET /api/ignores:`,
-      err.message,
-      err.stack || ""
-    );
+    logger.error(`Database error in GET /api/ignores: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
     res
       .status(500)
       .json({
         error: "Database operation failed",
         details: "Unable to retrieve ignores",
       });
+  } finally {
+
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
 
 app.get("/api/ping", async (req, res) => {
-  const { host_ip, host_port, target_server_url } = req.query;
-  const currentDebug = req.query.debug === "true" || debug;
-
+  const { host_ip, host_port, target_server_url, owner } = req.query;
+  const currentDebug = req.query.debug === "true";
+  
+  // Enable debug for this request if specified
+  if (currentDebug) logger.setDebugEnabled(true);
+  
   if (!host_ip || !host_port) {
     return res
       .status(400)
@@ -965,10 +1261,26 @@ app.get("/api/ping", async (req, res) => {
   if (isNaN(portNum) || portNum <= 0 || portNum > 65535) {
     return res.status(400).json({ error: "Invalid host_port" });
   }
+  
+  const serviceInfo = detectServiceType(host_port, owner);
+  
+  if (serviceInfo.type === 'system') {
+    return res.json({
+      reachable: true,
+      status: 'system',
+      color: 'gray',
+      title: serviceInfo.description,
+      serviceType: serviceInfo.type,
+      serviceName: serviceInfo.name
+    });
+  }
 
   let pingable_host_ip = host_ip;
-  const isBackendInDocker = process.env.RUNNING_IN_DOCKER === "true";
-
+  
+  const isInDocker = process.env.RUNNING_IN_DOCKER === "true" || 
+                     fs.existsSync("/.dockerenv") || 
+                     fs.existsSync("/proc/self/cgroup") && 
+                     fs.readFileSync("/proc/self/cgroup", "utf8").includes("docker");
   if (
     target_server_url &&
     (host_ip === "0.0.0.0" ||
@@ -979,99 +1291,72 @@ app.get("/api/ping", async (req, res) => {
     try {
       const peerUrlObj = new URL(target_server_url);
       pingable_host_ip = peerUrlObj.hostname;
-      if (currentDebug) {
-        console.log(
-          `[Server] DEBUG: [GET /api/ping] Remapping generic host_ip '${host_ip}' to peer host '${pingable_host_ip}' from target_server_url for port ${host_port}.`
-        );
-      }
-    } catch (e) {
-      console.error(
-        `[Server] ERROR: [GET /api/ping] Invalid target_server_url: ${target_server_url}`,
-        e.message
+      logPingDebug(
+        `Using peer server hostname '${pingable_host_ip}' for generic host_ip '${host_ip}' on port ${host_port}`
       );
+    } catch (e) {
+      logger.error(`[GET /api/ping] Invalid target_server_url: ${target_server_url} - ${e.message}`);
     }
   } else if (
-    isBackendInDocker &&
     (host_ip === "0.0.0.0" ||
       host_ip === "127.0.0.1" ||
       host_ip === "[::]" ||
       host_ip === "[::1]")
   ) {
-    pingable_host_ip = "host.docker.internal";
-    if (currentDebug) {
-      console.log(
-        `[Server] DEBUG: [GET /api/ping] Remapping generic host_ip '${host_ip}' to 'host.docker.internal' for local Docker ping to port ${host_port}.`
+    if (isInDocker) {
+      const dockerHostIP = getDockerHostIP();
+      pingable_host_ip = dockerHostIP;
+      logPingDebug(
+        `Detected Docker environment, using host IP '${dockerHostIP}' for port ${host_port}`
       );
-    }
-  } else if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: [GET /api/ping] Pinging ${pingable_host_ip}:${portNum} (isBackendInDocker: ${isBackendInDocker}, target_server_url: ${
-        target_server_url || "N/A"
-      }).`
-    );
-  }
-
-  let finalReachable = false;
-  let finalProtocol = "http";
-
-  if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: [GET /api/ping] Attempting HTTPS for ${pingable_host_ip}:${portNum}`
-    );
-  }
-  const httpsResponse = await testProtocol("https", pingable_host_ip, portNum);
-
-  if (httpsResponse.success) {
-    finalReachable = true;
-    finalProtocol = "https";
-    if (currentDebug) {
-      console.log(
-        `[Server] DEBUG: [GET /api/ping] HTTPS success for ${pingable_host_ip}:${portNum}`
+    } else {
+      pingable_host_ip = "localhost";
+      logPingDebug(
       );
     }
   } else {
-    if (currentDebug) {
-      console.log(
-        `[Server] DEBUG: [GET /api/ping] HTTPS failed for ${pingable_host_ip}:${portNum}. Reason: ${
-          httpsResponse.reason || `Status: ${httpsResponse.statusCode}`
-        }. Attempting HTTP.`
-      );
-    }
-    const httpResponse = await testProtocol("http", pingable_host_ip, portNum);
-    if (httpResponse.success) {
-      finalReachable = true;
-      finalProtocol = "http";
-      if (currentDebug) {
-        console.log(
-          `[Server] DEBUG: [GET /api/ping] HTTP success for ${pingable_host_ip}:${portNum}`
-        );
-      }
-    } else {
-      if (currentDebug) {
-        console.log(
-          `[Server] DEBUG: [GET /api/ping] HTTP also failed for ${pingable_host_ip}:${portNum}. Reason: ${
-            httpResponse.reason || `Status: ${httpResponse.statusCode}`
-          }`
-        );
-      }
-    }
+    logPingDebug(`Using provided host_ip '${host_ip}' for port ${host_port}`);
   }
-  if (currentDebug) {
-    console.log(
-      `[Server] DEBUG: [GET /api/ping] Ping result for ${pingable_host_ip}:${portNum} -> reachable: ${finalReachable}, protocol: ${finalProtocol}`
-    );
+  
+  // Only log service testing for first few pings or important services
+  const isImportantService = serviceInfo.type !== 'service' || portNum <= 1024;
+  if (currentDebug && (pingDebugStats.count <= 3 || isImportantService)) {
+    logger.debug(`Testing ${serviceInfo.name} (${serviceInfo.type}) on ${pingable_host_ip}:${portNum}`);
   }
-  res.json({ reachable: finalReachable, protocol: finalProtocol });
+
+  const httpsResponse = await testProtocol("https", pingable_host_ip, portNum, "/", currentDebug);
+  const httpResponse = await testProtocol("http", pingable_host_ip, portNum, "/", currentDebug);
+  
+  const result = determineServiceStatus(serviceInfo, httpsResponse, httpResponse);
+  
+  // Only log results for first few pings or failures
+  if (currentDebug && (pingDebugStats.count <= 3 || result.status === 'unreachable')) {
+    logger.debug(`Service status for ${pingable_host_ip}:${portNum} -> ${result.status} (${result.color})`);
+  }
+  
+  res.json({
+    reachable: result.status !== 'unreachable',
+    status: result.status,
+    color: result.color,
+    title: result.title,
+    protocol: result.protocol || null,
+    serviceType: serviceInfo.type,
+    serviceName: serviceInfo.name,
+    description: result.description
+  });
+  
+
+  if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
 });
 
 app.get("/api/health", (req, res) => {
-  console.log("[Server] INFO: Received GET /api/health request");
+  logger.debug("Health check requested");
   try {
     const dbCheck = db.prepare("SELECT 1").get();
     const memoryUsage = process.memoryUsage();
     const uptime = process.uptime();
 
-    console.log("[Server] INFO: Sending /api/health response");
+    logger.debug("Health check successful");
     res.json({
       status: "healthy",
       timestamp: new Date().toISOString(),
@@ -1080,11 +1365,8 @@ app.get("/api/health", (req, res) => {
       database: "connected",
     });
   } catch (error) {
-    console.error(
-      "[Server] ERROR: Health check failed:",
-      error.message,
-      error.stack || ""
-    );
+    logger.error("Health check failed:", error.message);
+    logger.debug("Stack trace:", error.stack || "");
     res.status(503).json({
       status: "unhealthy",
       error: error.message,
@@ -1094,22 +1376,15 @@ app.get("/api/health", (req, res) => {
 });
 
 const staticPath = path.join(__dirname, "public");
-console.log(
-  `[Server] INFO: Attempting to serve static files from: ${staticPath}`
-);
+logger.info(`Attempting to serve static files from: ${staticPath}`);
 app.use(express.static(staticPath, { fallthrough: true, index: false }));
 
 app.get("*", (req, res, next) => {
   const indexPath = path.join(__dirname, "public", "index.html");
-  console.log(
-    `[Server] INFO: Catch-all GET '*' received for path: ${req.path}. Attempting to serve: ${indexPath}`
-  );
+  logger.debug(`Serving frontend for path: ${req.path}`);
   res.sendFile(indexPath, (err) => {
     if (err) {
-      console.error(
-        `[Server] ERROR: Failed to send ${indexPath} for ${req.path}:`,
-        err.message
-      );
+      logger.error(`Failed to send ${indexPath} for ${req.path}: ${err.message}`);
       if (!res.headersSent) {
         res.status(404).json({
           error: "Frontend entry point not found",
@@ -1117,18 +1392,13 @@ app.get("*", (req, res, next) => {
         });
       }
     } else {
-      console.log(
-        `[Server] INFO: Successfully sent ${indexPath} for ${req.path}`
-      );
+      logger.debug(`Successfully served frontend for ${req.path}`);
     }
   });
 });
 
 app.use((err, req, res, next) => {
-  console.error(
-    "[Server] FATAL: Unhandled error in Express middleware:",
-    err.stack || err.message
-  );
+  logger.fatal("Unhandled error in Express middleware:", err.stack || err.message);
   if (!res.headersSent) {
     res
       .status(500)
@@ -1138,36 +1408,23 @@ app.use((err, req, res, next) => {
   }
 });
 
-console.log(`[Server] INFO: About to call app.listen on port ${PORT}`);
+logger.info(`About to call app.listen on port ${PORT}`);
 try {
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(
-      `[Server] INFO: Server is now listening on http://0.0.0.0:${PORT}`
-    );
-    console.log(`[Server] INFO: Full startup message complete.`);
+    logger.info(`Server is now listening on http://0.0.0.0:${PORT}`);
+    logger.info("Full startup message complete.");
   });
 } catch (listenError) {
-  console.error(
-    "[Server] FATAL: app.listen failed to start:",
-    listenError.message,
-    listenError.stack || ""
-  );
+  logger.fatal("app.listen failed to start:", listenError.message);
+  logger.debug("Stack trace:", listenError.stack || "");
   process.exit(1);
 }
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error(
-    "[Server] FATAL: Unhandled Rejection at:",
-    promise,
-    "reason:",
-    reason
-  );
+  logger.fatal("Unhandled Rejection at:", promise, "reason:", reason);
 });
 
 process.on("uncaughtException", (error) => {
-  console.error(
-    "[Server] FATAL: Uncaught Exception:",
-    error.stack || error.message
-  );
+  logger.fatal("Uncaught Exception:", error.stack || error.message);
   process.exit(1);
 });
