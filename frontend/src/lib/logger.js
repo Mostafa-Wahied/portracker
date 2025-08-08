@@ -84,7 +84,12 @@ class Logger {
   }
 }
 
-// Factory function for creating loggers (consistent with backend pattern)
+/**
+ * Creates and returns a new Logger instance for the specified component.
+ * @param {string} componentName - The name of the component associated with the logger.
+ * @param {Object} [options={}] - Optional configuration for the logger, such as debug settings.
+ * @return {Logger} A Logger instance configured for the given component.
+ */
 function LoggerFactory(componentName, options = {}) {
   return new Logger(componentName, options);
 }
