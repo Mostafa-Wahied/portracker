@@ -30,6 +30,11 @@ const pingDebugStats = {
   lastSummaryTime: Date.now()
 };
 
+/**
+ * Logs ping debug messages with rate limiting to reduce log spam, emitting summaries every 30 seconds or when forced.
+ * @param {string} message - The debug message to log.
+ * @param {boolean} [force=false] - If true, logs the message regardless of rate limits.
+ */
 function logPingDebug(message, force = false) {
   pingDebugStats.count++;
   const now = Date.now();
@@ -66,6 +71,12 @@ const WELL_KNOWN_PORTS = {
   9000: { name: 'Management', type: 'web', description: 'Common management interface port' },
 };
 
+/**
+ * Determines the service type and metadata for a given port and optional owner string.
+ * @param {number|string} port - The port number to classify.
+ * @param {string} [owner] - Optional process or service owner name for heuristic detection.
+ * @return {Object} An object containing the service name, type, and description.
+ */
 function detectServiceType(port, owner) {
   const portNum = parseInt(port, 10);
   
@@ -103,6 +114,12 @@ function detectServiceType(port, owner) {
   return { name: 'Service', type: 'service', description: 'Application service' };
 }
 
+/**
+ * Determines the Docker host IP address for the current environment.
+ *
+ * Returns the appropriate host IP for Docker containers, handling Docker Desktop, macOS, Windows, and Linux environments. Attempts to extract the gateway IP from `/proc/net/route` on Linux systems; falls back to `172.17.0.1` if detection fails.
+ * @return {string} The Docker host IP address.
+ */
 function getDockerHostIP() {
   const platform = os.platform();
   
@@ -139,6 +156,10 @@ function getDockerHostIP() {
   return "172.17.0.1";
 }
 
+/**
+ * Determines if the current environment is Docker Desktop.
+ * @return {boolean} True if running inside Docker Desktop, otherwise false.
+ */
 function isDockerDesktopEnvironment() {
   try {
     if (process.env.DOCKER_DESKTOP === 'true') {
@@ -181,6 +202,18 @@ function isDockerDesktopEnvironment() {
   }
 }
 
+/**
+ * Tests the reachability of a service over HTTP or HTTPS by sending HEAD and GET requests.
+ *
+ * Attempts a HEAD request first; if unsuccessful, falls back to a GET request. Measures response time, captures status codes, and detects single-page application (SPA) patterns in 404 HTML responses. Returns detailed information about reachability, protocol, method, response time, and SPA detection.
+ *
+ * @param {string} scheme - The protocol to use ("http" or "https").
+ * @param {string} host_ip - The target host IP address.
+ * @param {number} port - The target port number.
+ * @param {string} [path="/"] - The request path.
+ * @param {boolean} [isDebugEnabled=false] - Enables debug logging if true.
+ * @return {Promise<Object>} An object indicating reachability, status code, protocol, method, response time, and SPA detection if applicable.
+ */
 async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PING_TIMEOUT);
@@ -302,6 +335,16 @@ async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = 
   }
 }
 
+/**
+ * Determines the status and accessibility of a service based on its type and HTTP(S) response data.
+ *
+ * Evaluates the service type and the results of HTTP and HTTPS protocol checks to classify the service as accessible, listening, unreachable, or in error. Returns a status object with color coding, descriptive title, and protocol information when applicable.
+ *
+ * @param {Object} serviceInfo - Metadata about the service, including type, name, and description.
+ * @param {Object} httpsResponse - Result of the HTTPS protocol check, including reachability and status code.
+ * @param {Object} httpResponse - Result of the HTTP protocol check, including reachability and status code.
+ * @return {Object} An object describing the service's status, color, title, description, and protocol if relevant.
+ */
 function determineServiceStatus(serviceInfo, httpsResponse, httpResponse) {
   const serviceType = serviceInfo.type;
   
@@ -603,7 +646,10 @@ app.get("/api/all-ports", async (req, res) => {
 });
 
 /**
- * Get local ports using the best available collector
+ * Collects and returns the list of open ports on the local system using the most suitable platform-specific collector.
+ * @param {Object} [options] - Optional settings for port collection.
+ * @param {boolean} [options.debug] - Enables debug logging if true.
+ * @return {Promise<Array>} Resolves with an array of port information objects.
  */
 async function getLocalPortsUsingCollectors(options = {}) {
   const currentDebug = options.debug || false;
@@ -877,6 +923,10 @@ function validateNoteInput(req, res, next) {
   next();
 }
 
+/**
+ * Middleware that validates the presence and format of the server ID parameter in the request.
+ * Responds with a 400 error if the ID is missing or not a non-empty string.
+ */
 function validateServerIdParam(req, res, next) {
   const serverId = req.params.id;
   if (

@@ -13,7 +13,11 @@ const {
 // Initialize centralized logger
 const logger = new Logger("TrueNAS-WS", { debug: process.env.DEBUG === 'true' });
 
-// Helper to log debug messages consistently
+/**
+ * Logs a debug message for the TrueNAS WebSocket client using the centralized logger.
+ * @param {string} message - The debug message to log.
+ * @param {...any} args - Additional arguments to include in the log message.
+ */
 function debugWS(message, ...args) {
   logger.debug(message, ...args);
 }

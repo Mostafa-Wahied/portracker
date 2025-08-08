@@ -6,6 +6,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+/**
+ * Displays a colored status indicator with tooltip for a network port's reachability and status.
+ *
+ * Fetches the port's status from an API and visually represents it as a colored dot, with a tooltip describing the current state (e.g., reachable, unreachable, checking). Calls the optional `onProtocolChange` callback if the protocol is detected.
+ */
 export function PortStatusIndicator({
   serverId,
   serverUrl,
