@@ -5,7 +5,9 @@
 "main": "backend/index.js",
 "scripts": {
   "start": "node backend/index.js",
-  "test": "jest"
+  "test": "jest",
+  "lint": "eslint .",
+  "lint:fix": "eslint . --fix"
 },
 "repository": {
   "type": "git",
