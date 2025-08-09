@@ -28,11 +28,11 @@ class ProcParser {
     this.procPath = procPath;
     for (const testPath of procPaths) {
       try {
-        const stats = require('fs').statSync(path.join(testPath, 'net', 'tcp'));
+        require('fs').statSync(path.join(testPath, 'net', 'tcp'));
         this.procPath = testPath;
         this.logger.debug(`Using /proc path: ${this.procPath}`);
         break;
-      } catch (err) {
+  } catch {
         // Continue to next path
       }
     }

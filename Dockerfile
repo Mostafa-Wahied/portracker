@@ -1,5 +1,5 @@
 # Frontend Build Stage
-FROM node:20-bookworm AS frontend-build
+FROM node:20-bookworm-slim AS frontend-build
 WORKDIR /app/frontend
 
 # Copy package files
@@ -11,18 +11,18 @@ RUN npm ci --include=dev && npm cache clean --force && rm -rf ~/.npm
 # Copy source and build
 COPY frontend/ ./
 
-# Build with verbose output for debugging
-RUN npm run build --verbose
-
-# Verify build output exists
-RUN ls -la dist/ && echo "Frontend build verification complete"
+# Build the frontend
+RUN npm run build
 
 # Backend Build Stage
-FROM node:20-bookworm AS backend-build
+FROM node:20-bookworm-slim AS backend-build
 WORKDIR /app/backend
 
 # Install build dependencies for native modules
-RUN apt-get update && apt-get install -y \
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update --allow-releaseinfo-change && \
+    apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
@@ -42,7 +42,10 @@ COPY backend/ ./
 FROM node:20-slim AS production
 
 # Install only runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update --allow-releaseinfo-change && \
+    apt-get install -y --no-install-recommends \
     ca-certificates \
     iproute2 \
     iputils-ping \
@@ -61,9 +64,6 @@ COPY --from=backend-build /app/backend ./backend/
 
 # Copy built frontend assets
 COPY --from=frontend-build /app/frontend/dist ./backend/public/
-
-# Verify frontend files were copied to backend
-RUN ls -la ./backend/public/ && echo "Frontend files copied successfully"
 
 # Create data directory
 RUN mkdir -p /data

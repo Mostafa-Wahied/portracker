@@ -63,7 +63,7 @@ function ServerSectionComponent({
   onInfoCardLayoutChange,
 }) {
   // Initialize logger for ServerSection component
-  const logger = new Logger('ServerSection');
+  const logger = useMemo(() => new Logger('ServerSection'), []);
   
   const [sortConfig, setSortConfig] = useState(() => {
     try {
@@ -85,6 +85,24 @@ function ServerSectionComponent({
     [data]
   );
 
+  // Safety net: sanitize bad saved sort configs on mount
+  useEffect(() => {
+    const validKeys = ["default", "host_port", "owner", "created"];
+    let { key, direction } = sortConfig;
+    let changed = false;
+    if (!validKeys.includes(key)) {
+      key = "default";
+      direction = "ascending";
+      changed = true;
+    }
+    if (direction !== "ascending" && direction !== "descending") {
+      direction = "ascending";
+      changed = true;
+    }
+    if (changed) setSortConfig({ key, direction });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const sortedPorts = useMemo(() => {
     let sortablePorts = [...visiblePorts];
 
@@ -92,25 +110,34 @@ function ServerSectionComponent({
       return sortablePorts;
     }
 
+    const asc = sortConfig.direction === "ascending";
+    const normalizeForSort = (val) => {
+      if (val == null) return "";
+      if (Array.isArray(val)) return val.join(", ");
+      if (typeof val === "number") return String(val);
+      return String(val);
+    };
+
     if (sortConfig.key) {
       sortablePorts.sort((a, b) => {
+        // Numeric sorts
         if (sortConfig.key === "host_port") {
-          const portA = parseInt(a.host_port, 10);
-          const portB = parseInt(b.host_port, 10);
-          return sortConfig.direction === "ascending"
-            ? portA - portB
-            : portB - portA;
+          const portA = parseInt(a.host_port, 10) || 0;
+          const portB = parseInt(b.host_port, 10) || 0;
+          return asc ? portA - portB : portB - portA;
+        }
+        if (sortConfig.key === "created") {
+          const aNum = Number(a.created ?? 0);
+          const bNum = Number(b.created ?? 0);
+          return asc ? aNum - bNum : bNum - aNum;
         }
 
-        const valA = a[sortConfig.key] || "";
-        const valB = b[sortConfig.key] || "";
+        // Safe string sort
+        const valA = normalizeForSort(a[sortConfig.key]).toLowerCase();
+        const valB = normalizeForSort(b[sortConfig.key]).toLowerCase();
 
-        if (valA.toLowerCase() < valB.toLowerCase()) {
-          return sortConfig.direction === "ascending" ? -1 : 1;
-        }
-        if (valA.toLowerCase() > valB.toLowerCase()) {
-          return sortConfig.direction === "ascending" ? 1 : -1;
-        }
+        if (valA < valB) return asc ? -1 : 1;
+        if (valA > valB) return asc ? 1 : -1;
         return 0;
       });
     }
@@ -123,7 +150,7 @@ function ServerSectionComponent({
     } catch (error) {
       logger.warn("Failed to save sort config:", error);
     }
-  }, [sortConfig]);
+  }, [logger, sortConfig]);
 
   const getSortDisplayName = (key) => {
     switch (key) {

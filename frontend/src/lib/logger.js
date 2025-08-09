@@ -19,18 +19,30 @@ class Logger {
     }
     
     // Check URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('debug') === 'true') {
-      return true;
+    try {
+      if (typeof window !== 'undefined' && window.location && typeof window.location.search === 'string') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const dbg = urlParams.get('debug');
+        if (dbg === 'true' || dbg === '1') {
+          return true;
+        }
+        if (dbg === 'false' || dbg === '0') {
+          return false;
+        }
+      }
+    } catch {
+      // Ignore if URL parsing fails (e.g., non-browser env)
     }
     
     // Check localStorage
     try {
-      const stored = localStorage.getItem('portracker_debug');
-      if (stored === 'true') return true;
-      if (stored === 'false') return false;
-  } catch {
-      // localStorage might not be available
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('portracker_debug');
+        if (stored === 'true') return true;
+        if (stored === 'false') return false;
+      }
+    } catch {
+      // localStorage might not be available (SSR/tests)
     }
     
     return false; // Default to false for production
@@ -87,12 +99,6 @@ class Logger {
   }
 }
 
-/**
- * Creates and returns a new Logger instance for the specified component.
- * @param {string} componentName - The name of the component associated with the logger.
- * @param {Object} [options={}] - Optional configuration for the logger, such as debug settings.
- * @return {Logger} A Logger instance configured for the given component.
- */
 function LoggerFactory(componentName, options = {}) {
   return new Logger(componentName, options);
 }

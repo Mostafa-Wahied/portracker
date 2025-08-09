@@ -24,13 +24,7 @@ const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 // Initialize logger for App component
 const logger = new Logger('App');
 
-/**
- * Main React component for the server and port monitoring dashboard.
- *
- * Manages state, data fetching, transformation, and user interactions for displaying and managing servers and their network ports. Handles UI preferences, filtering, searching, note editing, port ignoring, server addition and deletion, and clipboard actions. Synchronizes relevant state with localStorage and supports auto-refresh and error fallback mechanisms.
- *
- * @return {JSX.Element} The rendered dashboard application.
- */
+
 export default function App() {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);

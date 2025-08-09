@@ -30,11 +30,7 @@ const pingDebugStats = {
   lastSummaryTime: Date.now()
 };
 
-/**
- * Logs ping debug messages with rate limiting to reduce log spam, emitting summaries every 30 seconds or when forced.
- * @param {string} message - The debug message to log.
- * @param {boolean} [force=false] - If true, logs the message regardless of rate limits.
- */
+
 function logPingDebug(message, force = false) {
   pingDebugStats.count++;
   const now = Date.now();
@@ -71,12 +67,6 @@ const WELL_KNOWN_PORTS = {
   9000: { name: 'Management', type: 'web', description: 'Common management interface port' },
 };
 
-/**
- * Determines the service type and metadata for a given port and optional owner string.
- * @param {number|string} port - The port number to classify.
- * @param {string} [owner] - Optional process or service owner name for heuristic detection.
- * @return {Object} An object containing the service name, type, and description.
- */
 function detectServiceType(port, owner) {
   const portNum = parseInt(port, 10);
   
@@ -114,12 +104,6 @@ function detectServiceType(port, owner) {
   return { name: 'Service', type: 'service', description: 'Application service' };
 }
 
-/**
- * Determines the Docker host IP address for the current environment.
- *
- * Returns the appropriate host IP for Docker containers, handling Docker Desktop, macOS, Windows, and Linux environments. Attempts to extract the gateway IP from `/proc/net/route` on Linux systems; falls back to `172.17.0.1` if detection fails.
- * @return {string} The Docker host IP address.
- */
 function getDockerHostIP() {
   const platform = os.platform();
   
@@ -156,10 +140,7 @@ function getDockerHostIP() {
   return "172.17.0.1";
 }
 
-/**
- * Determines if the current environment is Docker Desktop.
- * @return {boolean} True if running inside Docker Desktop, otherwise false.
- */
+
 function isDockerDesktopEnvironment() {
   try {
     if (process.env.DOCKER_DESKTOP === 'true') {
@@ -202,18 +183,7 @@ function isDockerDesktopEnvironment() {
   }
 }
 
-/**
- * Tests the reachability of a service over HTTP or HTTPS by sending HEAD and GET requests.
- *
- * Attempts a HEAD request first; if unsuccessful, falls back to a GET request. Measures response time, captures status codes, and detects single-page application (SPA) patterns in 404 HTML responses. Returns detailed information about reachability, protocol, method, response time, and SPA detection.
- *
- * @param {string} scheme - The protocol to use ("http" or "https").
- * @param {string} host_ip - The target host IP address.
- * @param {number} port - The target port number.
- * @param {string} [path="/"] - The request path.
- * @param {boolean} [isDebugEnabled=false] - Enables debug logging if true.
- * @return {Promise<Object>} An object indicating reachability, status code, protocol, method, response time, and SPA detection if applicable.
- */
+
 async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = false) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), PING_TIMEOUT);
@@ -333,6 +303,172 @@ async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = 
     clearTimeout(timeout);
     return { reachable: false, error: error.message };
   }
+}
+
+function determineServiceStatus(serviceInfo, httpsResponse, httpResponse) {
+  const serviceType = serviceInfo.type;
+  
+  if (serviceType === 'system') {
+    return {
+      status: 'system',
+      color: 'gray',
+      title: `${serviceInfo.name} - System service`,
+      description: serviceInfo.description
+    };
+  }
+  
+  let workingResponse = null;
+  
+  if (httpsResponse.reachable && httpsResponse.statusCode >= 200 && httpsResponse.statusCode < 300) {
+    workingResponse = httpsResponse;
+  } else if (httpResponse.reachable && httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
+    workingResponse = httpResponse;
+  } else if (httpsResponse.reachable) {
+    workingResponse = httpsResponse;
+  } else if (httpResponse.reachable) {
+    workingResponse = httpResponse;
+  }
+  
+  if (!workingResponse) {
+    return {
+      status: 'unreachable',
+      color: 'red',
+      title: `${serviceInfo.name} - Service not reachable`,
+      description: serviceInfo.description
+    };
+  }
+  
+  if (serviceType === 'web') {
+    const statusCode = workingResponse.statusCode;
+    
+    if (statusCode >= 200 && statusCode < 400) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web service accessible`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 401) {
+      return {
+        status: 'accessible',
+        color: 'green', 
+        title: `${serviceInfo.name} - Web accessible (auth)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 403) {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Listening (Forbidden)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 405 && workingResponse.method === 'HEAD') {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web accessible (GET)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 404) {
+      if (workingResponse.isSPA) {
+        return {
+          status: 'accessible',
+          color: 'green',
+          title: `${serviceInfo.name} - Web accessible`,
+          description: serviceInfo.description,
+          protocol: workingResponse.protocol
+        };
+      } else {
+        return {
+          status: 'listening',
+          color: 'yellow',
+          title: `${serviceInfo.name} - Listening (no web UI)`,
+          description: serviceInfo.description,
+          protocol: workingResponse.protocol
+        };
+      }
+    }
+    
+    if (statusCode >= 400 && statusCode < 500) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web accessible (HTTP ${statusCode})`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode >= 500) {
+      return {
+        status: 'error',
+        color: 'red',
+        title: `${serviceInfo.name} - HTTP ${statusCode} error`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+  }
+  
+  if (serviceType === 'database' || serviceType === 'service') {
+    const statusCode = workingResponse.statusCode;
+    
+    if (statusCode === 401) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - HTTP accessible (auth)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 403) {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Listening (Forbidden)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode < 500) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - HTTP accessible`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    } else {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Service listening (not HTTP)`,
+        description: serviceInfo.description
+      };
+    }
+  }
+  
+  return {
+    status: 'listening',
+    color: 'yellow',
+    title: `${serviceInfo.name} - Service listening`,
+    description: serviceInfo.description
+  };
 }
 
 /**

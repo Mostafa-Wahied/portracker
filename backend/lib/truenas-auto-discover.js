@@ -9,11 +9,7 @@ const { Logger } = require('./logger');
 // Initialize logger for auto-discovery
 const logger = new Logger("TrueNAS-Discovery", { debug: process.env.DEBUG === 'true' });
 
-/**
- * Logs a debug message using the TrueNAS-Discovery logger.
- * @param {string} message - The debug message to log.
- * @param {...any} args - Additional arguments to include in the log message.
- */
+// Helper function for debug logging
 function debugDiscovery(message, ...args) {
   logger.debug(message, ...args);
 }
@@ -195,7 +191,7 @@ function callSocketMethod(socketPath, method, options = {}) {
  * If running inside a container, attempts to detect the default gateway IP and includes additional container-specific addresses.
  * @returns {Array<string>} Array of host addresses to attempt for network connections.
  */
-function detectHostAddresses(options = {}) {
+function detectHostAddresses() {
   const hostAddresses = [];
 
   hostAddresses.push("127.0.0.1", "localhost");

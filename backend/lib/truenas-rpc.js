@@ -54,7 +54,7 @@ class TrueNASClient {
       if (!this.apiKey) {
         if (this.appDebugEnabled) {
           this.logger.info(
-            "ℹ️ No API key provided - TrueNAS enhanced features will be disabled. Setting up graceful degradation."
+            "No API key provided - TrueNAS enhanced features will be disabled. Setting up graceful degradation."
           );
         }
         this._setupGracefulDegradation();
@@ -83,11 +83,7 @@ class TrueNASClient {
       if (this.appDebugEnabled) {
         this.logger.warn(`WebSocket connection failed: ${wsError.message}`);
       }
-      this.logError(
-        "WebSocket connection error:",
-        wsError.message,
-        wsError.stack || "(no stack)"
-      );
+  this.logger.error("WebSocket connection error", { err: wsError });
       this._setupGracefulDegradation();
     }
   }
@@ -123,7 +119,7 @@ class TrueNASClient {
 
     try {
       if (this.appDebugEnabled) {
-        this.logger.debug(`Calling TrueNAS API method: ${method} with params:`, params);
+        this.logger.debug(`Calling TrueNAS API method: ${method}`);
       }
       const result = await this.client(method, params);
       if (this.appDebugEnabled) {
@@ -134,11 +130,7 @@ class TrueNASClient {
       if (this.appDebugEnabled) {
         this.logger.warn(`Error calling TrueNAS API method ${method}:`, err.message);
       }
-      this.logError(
-        `TrueNAS RPC Error for method '${method}':`,
-        err.message,
-        err.stack || "(no stack)"
-      );
+      this.logger.error(`TrueNAS RPC Error for method '${method}'`, { err });
       throw err;
     }
   }

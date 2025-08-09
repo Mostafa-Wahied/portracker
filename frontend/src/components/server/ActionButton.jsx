@@ -5,7 +5,6 @@ export function ActionButton({
   itemKey,
   actionFeedback,
   onClick,
-  // eslint-disable-next-line no-unused-vars
   icon: Icon,
   title,
   loading = false,

@@ -45,7 +45,18 @@ export function formatCpuSpeed(mhz) {
 
 export function formatCreatedDate(dateString) {
   if (!dateString) return "N/A";
-  const date = new Date(dateString.replace(" +0000 UTC", "Z"));
+  
+  let date;
+  if (typeof dateString === 'number') {
+    // Unix timestamp (seconds)
+    date = new Date(dateString * 1000);
+  } else if (typeof dateString === 'string') {
+    // ISO string, possibly with UTC suffix
+    date = new Date(dateString.replace(" +0000 UTC", "Z"));
+  } else {
+    return "N/A";
+  }
+  
   if (isNaN(date.getTime())) return dateString;
 
   const now = new Date();
@@ -67,7 +78,18 @@ export function formatCreatedDate(dateString) {
 
 export function formatCreatedTooltip(dateString) {
   if (!dateString) return "Created: N/A";
-  const date = new Date(dateString.replace(" +0000 UTC", "Z"));
+  
+  let date;
+  if (typeof dateString === 'number') {
+    // Unix timestamp (seconds)
+    date = new Date(dateString * 1000);
+  } else if (typeof dateString === 'string') {
+    // ISO string, possibly with UTC suffix
+    date = new Date(dateString.replace(" +0000 UTC", "Z"));
+  } else {
+    return "Created: N/A";
+  }
+  
   if (isNaN(date.getTime())) return `Created: ${dateString}`;
   return (
     "Created: " +
