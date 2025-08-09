@@ -431,16 +431,13 @@ class TrueNASCollector extends BaseCollector {
       for (const container of containers) {
         const containerName = container.Names;
         const containerId = container.ID;
-        
-        if (!container.Ports || container.Ports.length === 0) {
-          continue;
-        }
 
         const rawPorts = await this.dockerApi.docker.getContainer(container.ID).inspect();
         const portBindings = rawPorts.NetworkSettings.Ports || {};
 
-        for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
-          if (!hostBindings) continue;
+        if (container.Ports && container.Ports.length > 0) {
+          for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
+            if (!hostBindings) continue;
           
           const [port, protocol] = containerPort.split('/');
           
@@ -467,6 +464,7 @@ class TrueNASCollector extends BaseCollector {
               app_id: containerId,
             });
           }
+        }
         }
 
         // Also check for internal-only ports
@@ -765,7 +763,7 @@ class TrueNASCollector extends BaseCollector {
       if (cols.length < 4) continue;
 
       const protocol = cols[0].toLowerCase();
-      if (!protocol.includes('tcp') && !protocol.includes('udp')) return;
+      if (!protocol.includes('tcp') && !protocol.includes('udp')) continue;
 
       const localAddr = cols[3];
       if (!localAddr || !localAddr.includes(':')) continue;
@@ -1827,8 +1825,7 @@ class TrueNASCollector extends BaseCollector {
       const nameToId = new Map();
 
       containers.forEach((container) => {
-        const names = container.Names.split(',');
-        names.forEach(name => {
+        container.Names.forEach(name => {
           if (name) {
             nameToId.set(name.trim(), container.ID);
           }
