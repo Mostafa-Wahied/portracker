@@ -421,7 +421,8 @@ class TrueNASCollector extends BaseCollector {
    */
   async _getDockerPorts() {
     try {
-      this.log('Getting Docker port mappings via Docker API');
+      this.logInfo('DEBUG: Starting _getDockerPorts method');
+      this.logInfo('Getting Docker port mappings via Docker API');
       this._debugNetworkInterfaces();
       
       await this.dockerApi._ensureConnected();
@@ -432,9 +433,10 @@ class TrueNASCollector extends BaseCollector {
         const containerName = container.Names;
         const containerId = container.ID;
         
-        this.log(`Processing container: ${containerName} (${containerId})`);
+        this.logInfo(`DEBUG: Processing container: ${containerName} (${containerId})`);
         
         if (!container.Ports || container.Ports.length === 0) {
+          this.logInfo(`DEBUG: Container ${containerName} has no ports, skipping`);
           continue;
         }
 
@@ -475,8 +477,8 @@ class TrueNASCollector extends BaseCollector {
         const containerInspection = await this.dockerApi.inspectContainer(containerId);
         const exposedPorts = containerInspection.Config.ExposedPorts || {};
         
-        this.log(`Container ${containerName} exposed ports:`, JSON.stringify(exposedPorts));
-        this.log(`Container ${containerName} port bindings:`, JSON.stringify(portBindings));
+        this.logInfo(`DEBUG: Container ${containerName} exposed ports:`, JSON.stringify(exposedPorts));
+        this.logInfo(`DEBUG: Container ${containerName} port bindings:`, JSON.stringify(portBindings));
         
         for (const [exposedPort] of Object.entries(exposedPorts)) {
           const [port, protocol] = exposedPort.split('/');
@@ -485,10 +487,10 @@ class TrueNASCollector extends BaseCollector {
           // Check if this port is not already published
           const isPublished = Object.keys(portBindings).includes(exposedPort);
           
-          this.log(`Exposed port ${exposedPort}: isPublished=${isPublished}, portNum=${portNum}`);
+          this.logInfo(`DEBUG: Exposed port ${exposedPort}: isPublished=${isPublished}, portNum=${portNum}`);
           
           if (!isNaN(portNum) && !isPublished) {
-            this.log(`Adding internal port ${portNum} for container ${containerName}`);
+            this.logInfo(`DEBUG: Adding internal port ${portNum} for container ${containerName}`);
             ports.push({
               source: "docker",
               owner: containerName,
@@ -505,7 +507,7 @@ class TrueNASCollector extends BaseCollector {
         }
       }
       
-      this.log(`Total ports collected: ${ports.length}`);
+      this.logInfo(`DEBUG: Total ports collected from _getDockerPorts: ${ports.length}`);
       
       return ports;
     } catch (err) {
