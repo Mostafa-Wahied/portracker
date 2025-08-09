@@ -97,6 +97,19 @@ class TrueNASCollector extends BaseCollector {
   }
 
   /**
+   * Safely convert container names to string format
+   * Docker API can return Names as either string or array depending on context
+   * @param {string|Array} names - Container names from Docker API
+   * @returns {string} - Formatted container name string
+   */
+  _formatContainerNames(names) {
+    if (Array.isArray(names)) {
+      return names.join(', ');
+    }
+    return names || 'unknown';
+  }
+
+  /**
    * Check if this system is TrueNAS with confidence score
    * @param {Object} serverConfig The server's configuration, including API keys.
    * @returns {Promise<number>} Confidence score 0-100
@@ -222,7 +235,7 @@ class TrueNASCollector extends BaseCollector {
           const inspection = await this.dockerApi.inspectContainer(container.ID);
           containerData.push({
             id: container.ID,
-            name: container.Names,
+            name: this._formatContainerNames(container.Names),
             status: this._mapDockerStatus(container.State),
             image: container.Image,
             command: container.Command,
@@ -234,7 +247,7 @@ class TrueNASCollector extends BaseCollector {
           this.logWarn(`Failed to inspect container ${container.ID}: ${inspectErr.message}`);
           containerData.push({
             id: container.ID,
-            name: container.Names,
+            name: this._formatContainerNames(container.Names),
             status: this._mapDockerStatus(container.State),
             image: container.Image,
             command: container.Command,
@@ -266,7 +279,7 @@ class TrueNASCollector extends BaseCollector {
       const containers = await this.dockerApi.listContainers({ all: true });
       return containers.map((container) => ({
         id: container.ID,
-        name: container.Names,
+        name: this._formatContainerNames(container.Names),
         status: this._mapDockerStatus(container.State),
         image: container.Image,
         command: container.Command,
@@ -429,7 +442,7 @@ class TrueNASCollector extends BaseCollector {
       const ports = [];
       
       for (const container of containers) {
-        const containerName = container.Names;
+        const containerName = this._formatContainerNames(container.Names);
         const containerId = container.ID;
 
         const rawPorts = await this.dockerApi.docker.getContainer(container.ID).inspect();
@@ -974,7 +987,7 @@ class TrueNASCollector extends BaseCollector {
               if (pid && pid !== 0) {
                 pidToContainerMap.set(pid, {
                   id: container.ID,
-                  name: container.Names,
+                  name: this._formatContainerNames(container.Names),
                 });
               }
             } catch (inspectErr) {
@@ -1098,7 +1111,7 @@ class TrueNASCollector extends BaseCollector {
 
               if (portrackerContainer) {
                 const containerId = portrackerContainer.ID;
-                const containerName = portrackerContainer.Names;
+                const containerName = this._formatContainerNames(portrackerContainer.Names);
 
                 this.log(
                   `Re-classifying our own application port ${ourPort} from system/node to ${containerName}`
