@@ -484,8 +484,8 @@ class TrueNASCollector extends BaseCollector {
           const [port, protocol] = exposedPort.split('/');
           const portNum = parseInt(port, 10);
           
-          // Check if this port is not already published
-          const isPublished = Object.keys(portBindings).includes(exposedPort);
+          // Check if this port is not already published (has actual host bindings, not null)
+          const isPublished = portBindings[exposedPort] && portBindings[exposedPort] !== null;
           
           this.logInfo(`DEBUG: Exposed port ${exposedPort}: isPublished=${isPublished}, portNum=${portNum}`);
           
