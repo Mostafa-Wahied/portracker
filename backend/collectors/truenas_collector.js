@@ -206,7 +206,7 @@ class TrueNASCollector extends BaseCollector {
   }
 
   /**
-   * Get Docker containers using docker command
+   * Get Docker containers using Docker API
    * @returns {Promise<Array>} List of Docker containers
    */
   async _getDockerContainers() {
@@ -252,17 +252,17 @@ class TrueNASCollector extends BaseCollector {
         err.message,
         err.stack
       );
-      return this._getDockerContainersWithPs();
+      return this._getDockerContainersAlternative();
     }
   }
 
   /**
-   * Fallback method to get Docker containers using 'docker ps'.
+   * Alternative method to get Docker containers using Docker API (retry with different options).
    * @returns {Promise<Array>} List of Docker containers
    */
-  async _getDockerContainersWithPs() {
+  async _getDockerContainersAlternative() {
     try {
-      this.logWarn('Falling back to Docker API listContainers for container collection.');
+      this.logWarn('Using alternative Docker API call for container collection.');
       const containers = await this.dockerApi.listContainers({ all: true });
       return containers.map((container) => ({
         id: container.ID,
@@ -276,7 +276,7 @@ class TrueNASCollector extends BaseCollector {
       }));
     } catch (err) {
       this.logError(
-        'Error getting Docker containers via Docker API fallback:',
+        'Error getting Docker containers via alternative Docker API call:',
         err.message,
         err.stack
       );
