@@ -432,6 +432,8 @@ class TrueNASCollector extends BaseCollector {
         const containerName = container.Names;
         const containerId = container.ID;
         
+        this.log(`Processing container: ${containerName} (${containerId})`);
+        
         if (!container.Ports || container.Ports.length === 0) {
           continue;
         }
@@ -473,6 +475,9 @@ class TrueNASCollector extends BaseCollector {
         const containerInspection = await this.dockerApi.inspectContainer(containerId);
         const exposedPorts = containerInspection.Config.ExposedPorts || {};
         
+        this.log(`Container ${containerName} exposed ports:`, JSON.stringify(exposedPorts));
+        this.log(`Container ${containerName} port bindings:`, JSON.stringify(portBindings));
+        
         for (const [exposedPort] of Object.entries(exposedPorts)) {
           const [port, protocol] = exposedPort.split('/');
           const portNum = parseInt(port, 10);
@@ -480,7 +485,10 @@ class TrueNASCollector extends BaseCollector {
           // Check if this port is not already published
           const isPublished = Object.keys(portBindings).includes(exposedPort);
           
+          this.log(`Exposed port ${exposedPort}: isPublished=${isPublished}, portNum=${portNum}`);
+          
           if (!isNaN(portNum) && !isPublished) {
+            this.log(`Adding internal port ${portNum} for container ${containerName}`);
             ports.push({
               source: "docker",
               owner: containerName,
