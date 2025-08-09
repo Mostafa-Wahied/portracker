@@ -421,7 +421,6 @@ class TrueNASCollector extends BaseCollector {
    */
   async _getDockerPorts() {
     try {
-      this.logInfo('DEBUG: Starting _getDockerPorts method');
       this.logInfo('Getting Docker port mappings via Docker API');
       this._debugNetworkInterfaces();
       
@@ -433,10 +432,7 @@ class TrueNASCollector extends BaseCollector {
         const containerName = container.Names;
         const containerId = container.ID;
         
-        this.logInfo(`DEBUG: Processing container: ${containerName} (${containerId})`);
-        
         if (!container.Ports || container.Ports.length === 0) {
-          this.logInfo(`DEBUG: Container ${containerName} has no ports, skipping`);
           continue;
         }
 
@@ -477,9 +473,6 @@ class TrueNASCollector extends BaseCollector {
         const containerInspection = await this.dockerApi.inspectContainer(containerId);
         const exposedPorts = containerInspection.Config.ExposedPorts || {};
         
-        this.logInfo(`DEBUG: Container ${containerName} exposed ports:`, JSON.stringify(exposedPorts));
-        this.logInfo(`DEBUG: Container ${containerName} port bindings:`, JSON.stringify(portBindings));
-        
         for (const [exposedPort] of Object.entries(exposedPorts)) {
           const [port, protocol] = exposedPort.split('/');
           const portNum = parseInt(port, 10);
@@ -487,10 +480,7 @@ class TrueNASCollector extends BaseCollector {
           // Check if this port is not already published (has actual host bindings, not null)
           const isPublished = portBindings[exposedPort] && portBindings[exposedPort] !== null;
           
-          this.logInfo(`DEBUG: Exposed port ${exposedPort}: isPublished=${isPublished}, portNum=${portNum}`);
-          
           if (!isNaN(portNum) && !isPublished) {
-            this.logInfo(`DEBUG: Adding internal port ${portNum} for container ${containerName}`);
             ports.push({
               source: "docker",
               owner: containerName,
@@ -507,7 +497,6 @@ class TrueNASCollector extends BaseCollector {
         }
       }
       
-      this.logInfo(`DEBUG: Total ports collected from _getDockerPorts: ${ports.length}`);
       
       return ports;
     } catch (err) {
