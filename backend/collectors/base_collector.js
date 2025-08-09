@@ -99,6 +99,7 @@ class BaseCollector {
       };
     } catch (error) {
       this.logger.error('Error collecting all data', { err: error });
+
       return {
         platform: this.platform,
         platformName: this.platformName,

@@ -508,7 +508,6 @@ class TrueNASCollector extends BaseCollector {
         }
       }
       
-      
       return ports;
     } catch (err) {
       this.logError(

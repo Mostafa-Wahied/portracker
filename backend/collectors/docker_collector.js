@@ -375,6 +375,27 @@ class DockerCollector extends BaseCollector {
             });
           }
 
+          const internalPorts = [];
+          if (exposedPorts && typeof exposedPorts === 'object') {
+            Object.keys(exposedPorts).forEach(portDef => {
+              const [port, protocol] = portDef.split('/');
+              const portNum = parseInt(port, 10);
+              if (!isNaN(portNum)) {
+                internalPorts.push({
+                  source: "docker",
+                  owner: containerName,
+                  protocol: protocol || "tcp",
+                  host_ip: "0.0.0.0",
+                  host_port: portNum,
+                  target: `${containerId.substring(0, 12)}:${portNum}(internal)`,
+                  container_id: containerId,
+                  app_id: containerName,
+                  internal: true
+                });
+              }
+            });
+          }
+
           return {
             id: containerId,
             name: containerName,

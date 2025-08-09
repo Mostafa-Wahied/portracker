@@ -30,6 +30,7 @@ const pingDebugStats = {
   lastSummaryTime: Date.now()
 };
 
+
 function logPingDebug(message, force = false) {
   pingDebugStats.count++;
   const now = Date.now();
@@ -139,6 +140,7 @@ function getDockerHostIP() {
   return "172.17.0.1";
 }
 
+
 function isDockerDesktopEnvironment() {
   try {
     if (process.env.DOCKER_DESKTOP === 'true') {
@@ -180,6 +182,7 @@ function isDockerDesktopEnvironment() {
     return false;
   }
 }
+
 
 async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = false) {
   const controller = new AbortController();
@@ -302,6 +305,182 @@ async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = 
   }
 }
 
+function determineServiceStatus(serviceInfo, httpsResponse, httpResponse) {
+  const serviceType = serviceInfo.type;
+  
+  if (serviceType === 'system') {
+    return {
+      status: 'system',
+      color: 'gray',
+      title: `${serviceInfo.name} - System service`,
+      description: serviceInfo.description
+    };
+  }
+  
+  let workingResponse = null;
+  
+  if (httpsResponse.reachable && httpsResponse.statusCode >= 200 && httpsResponse.statusCode < 300) {
+    workingResponse = httpsResponse;
+  } else if (httpResponse.reachable && httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
+    workingResponse = httpResponse;
+  } else if (httpsResponse.reachable) {
+    workingResponse = httpsResponse;
+  } else if (httpResponse.reachable) {
+    workingResponse = httpResponse;
+  }
+  
+  if (!workingResponse) {
+    return {
+      status: 'unreachable',
+      color: 'red',
+      title: `${serviceInfo.name} - Service not reachable`,
+      description: serviceInfo.description
+    };
+  }
+  
+  if (serviceType === 'web') {
+    const statusCode = workingResponse.statusCode;
+    
+    if (statusCode >= 200 && statusCode < 400) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web service accessible`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 401) {
+      return {
+        status: 'accessible',
+        color: 'green', 
+        title: `${serviceInfo.name} - Web accessible (auth)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 403) {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Listening (Forbidden)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 405 && workingResponse.method === 'HEAD') {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web accessible (GET)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 404) {
+      if (workingResponse.isSPA) {
+        return {
+          status: 'accessible',
+          color: 'green',
+          title: `${serviceInfo.name} - Web accessible`,
+          description: serviceInfo.description,
+          protocol: workingResponse.protocol
+        };
+      } else {
+        return {
+          status: 'listening',
+          color: 'yellow',
+          title: `${serviceInfo.name} - Listening (no web UI)`,
+          description: serviceInfo.description,
+          protocol: workingResponse.protocol
+        };
+      }
+    }
+    
+    if (statusCode >= 400 && statusCode < 500) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - Web accessible (HTTP ${statusCode})`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode >= 500) {
+      return {
+        status: 'error',
+        color: 'red',
+        title: `${serviceInfo.name} - HTTP ${statusCode} error`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+  }
+  
+  if (serviceType === 'database' || serviceType === 'service') {
+    const statusCode = workingResponse.statusCode;
+    
+    if (statusCode === 401) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - HTTP accessible (auth)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode === 403) {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Listening (Forbidden)`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    }
+    
+    if (statusCode < 500) {
+      return {
+        status: 'accessible',
+        color: 'green',
+        title: `${serviceInfo.name} - HTTP accessible`,
+        description: serviceInfo.description,
+        protocol: workingResponse.protocol
+      };
+    } else {
+      return {
+        status: 'listening',
+        color: 'yellow',
+        title: `${serviceInfo.name} - Service listening (not HTTP)`,
+        description: serviceInfo.description
+      };
+    }
+  }
+  
+  return {
+    status: 'listening',
+    color: 'yellow',
+    title: `${serviceInfo.name} - Service listening`,
+    description: serviceInfo.description
+  };
+}
+
+/**
+ * Determines the status and accessibility of a service based on its type and HTTP(S) response data.
+ *
+ * Evaluates the service type and the results of HTTP and HTTPS protocol checks to classify the service as accessible, listening, unreachable, or in error. Returns a status object with color coding, descriptive title, and protocol information when applicable.
+ *
+ * @param {Object} serviceInfo - Metadata about the service, including type, name, and description.
+ * @param {Object} httpsResponse - Result of the HTTPS protocol check, including reachability and status code.
+ * @param {Object} httpResponse - Result of the HTTP protocol check, including reachability and status code.
+ * @return {Object} An object describing the service's status, color, title, description, and protocol if relevant.
+ */
 function determineServiceStatus(serviceInfo, httpsResponse, httpResponse) {
   const serviceType = serviceInfo.type;
   
@@ -603,7 +782,10 @@ app.get("/api/all-ports", async (req, res) => {
 });
 
 /**
- * Get local ports using the best available collector
+ * Collects and returns the list of open ports on the local system using the most suitable platform-specific collector.
+ * @param {Object} [options] - Optional settings for port collection.
+ * @param {boolean} [options.debug] - Enables debug logging if true.
+ * @return {Promise<Array>} Resolves with an array of port information objects.
  */
 async function getLocalPortsUsingCollectors(options = {}) {
   const currentDebug = options.debug || false;
@@ -877,6 +1059,10 @@ function validateNoteInput(req, res, next) {
   next();
 }
 
+/**
+ * Middleware that validates the presence and format of the server ID parameter in the request.
+ * Responds with a 400 error if the ID is missing or not a non-empty string.
+ */
 function validateServerIdParam(req, res, next) {
   const serverId = req.params.id;
   if (
