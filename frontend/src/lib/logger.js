@@ -10,7 +10,6 @@ class Logger {
     
     // Check debug flag from localStorage, URL params, or options
     this.debugEnabled = this._getDebugSetting(options);
-    this.prefix = `[${this.formatTimestamp()}] [${this.componentName}]`;
   }
 
   _getDebugSetting(options) {
@@ -20,18 +19,30 @@ class Logger {
     }
     
     // Check URL parameters
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('debug') === 'true') {
-      return true;
+    try {
+      if (typeof window !== 'undefined' && window.location && typeof window.location.search === 'string') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const dbg = urlParams.get('debug');
+        if (dbg === 'true' || dbg === '1') {
+          return true;
+        }
+        if (dbg === 'false' || dbg === '0') {
+          return false;
+        }
+      }
+    } catch {
+      // Ignore if URL parsing fails (e.g., non-browser env)
     }
     
     // Check localStorage
     try {
-      const stored = localStorage.getItem('portracker_debug');
-      if (stored === 'true') return true;
-      if (stored === 'false') return false;
-    } catch (e) {
-      // localStorage might not be available
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('portracker_debug');
+        if (stored === 'true') return true;
+        if (stored === 'false') return false;
+      }
+    } catch {
+      // localStorage might not be available (SSR/tests)
     }
     
     return false; // Default to false for production
@@ -42,25 +53,29 @@ class Logger {
     return now.toISOString().slice(0, 19).replace('T', ' ');
   }
 
+  getPrefix() {
+    return `[${this.formatTimestamp()}] [${this.componentName}]`;
+  }
+
   log(...args) {
-    console.log(this.prefix, ...args);
+    console.log(this.getPrefix(), ...args);
   }
 
   info(...args) {
-    console.info(this.prefix, '[INFO]', ...args);
+    console.info(this.getPrefix(), '[INFO]', ...args);
   }
 
   warn(...args) {
-    console.warn(this.prefix, '[WARN]', ...args);
+    console.warn(this.getPrefix(), '[WARN]', ...args);
   }
 
   error(...args) {
-    console.error(this.prefix, '[ERROR]', ...args);
+    console.error(this.getPrefix(), '[ERROR]', ...args);
   }
 
   debug(...args) {
     if (this.debugEnabled) {
-      console.debug(this.prefix, '[DEBUG]', ...args);
+      console.debug(this.getPrefix(), '[DEBUG]', ...args);
     }
   }
 
@@ -71,7 +86,7 @@ class Logger {
 
   // Convenience method for errors with context
   errorWithContext(message, error, context = {}) {
-    console.error(this.prefix, '[ERROR]', message, {
+  console.error(this.getPrefix(), '[ERROR]', message, {
       error: error?.message || error,
       stack: error?.stack,
       ...context
@@ -80,7 +95,7 @@ class Logger {
 
   // Method for performance logging (frontend specific)
   performance(label, duration) {
-    console.log(this.prefix, '[PERF]', `${label}: ${duration}ms`);
+  console.log(this.getPrefix(), '[PERF]', `${label}: ${duration}ms`);
   }
 }
 
