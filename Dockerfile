@@ -1,5 +1,5 @@
 # Frontend Build Stage
-FROM node:20-bookworm AS frontend-build
+FROM node:20-bookworm-slim AS frontend-build
 WORKDIR /app/frontend
 
 # Copy package files
@@ -18,11 +18,14 @@ RUN npm run build --verbose
 RUN ls -la dist/ && echo "Frontend build verification complete"
 
 # Backend Build Stage
-FROM node:20-bookworm AS backend-build
+FROM node:20-bookworm-slim AS backend-build
 WORKDIR /app/backend
 
 # Install build dependencies for native modules
-RUN apt-get update && apt-get install -y \
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update --allow-releaseinfo-change && \
+    apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
@@ -42,7 +45,10 @@ COPY backend/ ./
 FROM node:20-slim AS production
 
 # Install only runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get update --allow-releaseinfo-change && \
+    apt-get install -y --no-install-recommends \
     ca-certificates \
     iproute2 \
     iputils-ping \

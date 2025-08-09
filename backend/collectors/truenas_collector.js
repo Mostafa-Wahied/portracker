@@ -19,6 +19,7 @@ const util = require("util");
 const execAsync = util.promisify(exec);
 const fs = require("fs");
 const { TrueNASClient } = require("../lib/truenas-rpc");
+const DockerAPIClient = require("../lib/docker-api");
 const PerformanceTracker = require("../utils/performance-tracker");
 const ProcParser = require("../lib/proc-parser");
 
@@ -34,6 +35,9 @@ class TrueNASCollector extends BaseCollector {
     this.name = "TrueNAS Collector";
     this.client = new TrueNASClient({ debug: this.debug });
     this.procParser = new ProcParser();
+    this.dockerApi = new DockerAPIClient();
+    // Initialize the Docker API
+    this._initializeDocker();
 
     // Initialize cache system
     this.cache = {
@@ -77,6 +81,19 @@ class TrueNASCollector extends BaseCollector {
       67: "DHCP",
       68: "DHCP",
     };
+  }
+
+  /**
+   * Initialize Docker API (async initialization)
+   * @private
+   */
+  async _initializeDocker() {
+    try {
+      return await this.dockerApi.connect();
+    } catch (error) {
+      this.logWarn('Docker API initialization failed:', error.message);
+      return false;
+    }
   }
 
   /**
@@ -194,36 +211,44 @@ class TrueNASCollector extends BaseCollector {
    */
   async _getDockerContainers() {
     try {
-      this.log(
-        'Getting Docker containers via "docker inspect" for robust data'
-      );
-      const { stdout: containerIds } = await execAsync("docker ps -aq");
-      if (!containerIds.trim()) {
-        return [];
+      this.log('Getting Docker containers via Docker API');
+      await this.dockerApi._ensureConnected();
+      
+      const containers = await this.dockerApi.listContainers({ all: true });
+      
+      const containerData = [];
+      for (const container of containers) {
+        try {
+          const inspection = await this.dockerApi.inspectContainer(container.ID);
+          containerData.push({
+            id: container.ID,
+            name: container.Names,
+            status: this._mapDockerStatus(container.State),
+            image: container.Image,
+            command: container.Command,
+            created: container.Created,
+            ports: inspection.HostConfig.PortBindings,
+            networks: Object.keys(inspection.NetworkSettings.Networks).join(", "),
+          });
+        } catch (inspectErr) {
+          this.logWarn(`Failed to inspect container ${container.ID}: ${inspectErr.message}`);
+          containerData.push({
+            id: container.ID,
+            name: container.Names,
+            status: this._mapDockerStatus(container.State),
+            image: container.Image,
+            command: container.Command,
+            created: container.Created,
+            ports: {},
+            networks: '',
+          });
+        }
       }
 
-      const ids = containerIds.trim().split("\n").join(" ");
-      const { stdout: inspectOutput } = await execAsync(
-        `docker inspect ${ids}`
-      );
-
-      const containers = JSON.parse(inspectOutput).map((container) => ({
-        id: container.Id,
-        name: container.Name.startsWith("/")
-          ? container.Name.substring(1)
-          : container.Name,
-        status: this._mapDockerStatus(container.State.Status),
-        image: container.Config.Image,
-        command: container.Path + " " + container.Args.join(" "),
-        created: container.Created,
-        ports: container.HostConfig.PortBindings,
-        networks: Object.keys(container.NetworkSettings.Networks).join(", "),
-      }));
-
-      return containers;
+      return containerData;
     } catch (err) {
       this.logError(
-        'Error getting Docker containers via "docker inspect":',
+        'Error getting Docker containers via Docker API:',
         err.message,
         err.stack
       );
@@ -237,36 +262,21 @@ class TrueNASCollector extends BaseCollector {
    */
   async _getDockerContainersWithPs() {
     try {
-      this.logWarn('Falling back to "docker ps" for container collection.');
-      const { stdout } = await execAsync('docker ps -a --format "{{json .}}"');
-      const containers = stdout
-        .split("\n")
-        .filter((line) => line.trim())
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch (err) {
-            this.logWarn("Error parsing container JSON line:", err.message, {
-              line,
-            });
-            return null;
-          }
-        })
-        .filter(Boolean)
-        .map((container) => ({
-          id: container.ID,
-          name: container.Names,
-          status: this._mapDockerStatus(container.Status),
-          image: container.Image,
-          command: container.Command,
-          created: container.CreatedAt,
-          ports: container.Ports,
-          networks: container.Networks,
-        }));
-      return containers;
+      this.logWarn('Falling back to Docker API listContainers for container collection.');
+      const containers = await this.dockerApi.listContainers({ all: true });
+      return containers.map((container) => ({
+        id: container.ID,
+        name: container.Names,
+        status: this._mapDockerStatus(container.State),
+        image: container.Image,
+        command: container.Command,
+        created: container.Created,
+        ports: container.Ports,
+        networks: container.Networks || '',
+      }));
     } catch (err) {
       this.logError(
-        'Error getting Docker containers via fallback "docker ps":',
+        'Error getting Docker containers via Docker API fallback:',
         err.message,
         err.stack
       );
@@ -411,77 +421,78 @@ class TrueNASCollector extends BaseCollector {
    */
   async _getDockerPorts() {
     try {
-      this.log('Getting Docker port mappings via "docker ps" (for port list)');
+      this.log('Getting Docker port mappings via Docker API');
       this._debugNetworkInterfaces();
-      const { stdout } = await execAsync(
-        'docker ps -a --no-trunc --format "{{.Names}}|{{.Ports}}|{{.ID}}"'
-      );
-      const lines = stdout.trim().split("\n");
+      
+      await this.dockerApi._ensureConnected();
+      const containers = await this.dockerApi.listContainers({ all: true });
       const ports = [];
       
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        const [name, portsStr, containerId] = line.split("|");
+      for (const container of containers) {
+        const containerName = container.Names;
+        const containerId = container.ID;
         
-        if (!portsStr || portsStr === "") {
+        if (!container.Ports || container.Ports.length === 0) {
           continue;
         }
-        
-        const portMappings = portsStr.split(", ");
-        for (const mapping of portMappings) {
-          
-          if (mapping.includes("->")) {
-            const [external, internal] = mapping.split("->");
 
-            let hostIP = "*";
-            let hostPort;
-            if (external.includes(":")) {
-              const parts = external.split(":");
-              hostIP = this._resolveHostIP(parts[0]);
-              hostPort = parts[1];
-            } else {
-              hostPort = external;
-              hostIP = this._getServerIP();
-            }
-            const [containerPort, proto] = internal.split("/");
+        const rawPorts = await this.dockerApi.docker.getContainer(container.ID).inspect();
+        const portBindings = rawPorts.NetworkSettings.Ports || {};
+
+        for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
+          if (!hostBindings) continue;
+          
+          const [port, protocol] = containerPort.split('/');
+          
+          for (const hostBinding of hostBindings) {
+            const hostIP = this._resolveHostIP(hostBinding.HostIp || '0.0.0.0');
+            const hostPort = hostBinding.HostPort;
 
             if (hostIP.endsWith(".255")) {
               this.log(
-                `Skipping broadcast address port for ${name}: ${hostIP}:${hostPort}`
+                `Skipping broadcast address port for ${containerName}: ${hostIP}:${hostPort}`
               );
               continue;
             }
 
             ports.push({
               source: "docker",
-              owner: name,
-              protocol: proto || "tcp",
+              owner: containerName,
+              protocol: protocol || "tcp",
               host_ip: hostIP,
               host_port: parseInt(hostPort, 10),
-              target: containerPort,
+              target: port,
               container_id: containerId,
               vm_id: null,
               app_id: containerId,
             });
-          } else if (mapping.match(/^\d+\/(tcp|udp)$/)) {
-            const [port, protocol] = mapping.split('/');
-            const portNum = parseInt(port, 10);
-            if (!isNaN(portNum)) {
-              ports.push({
-                source: "docker",
-                owner: name,
-                protocol: protocol || "tcp",
-                host_ip: "0.0.0.0",
-                host_port: portNum,
-                target: `${containerId.substring(0, 12)}:${portNum}(internal)`,
-                container_id: containerId,
-                vm_id: null,
-                app_id: containerId,
-                internal: true
-              });
-            }
-          } else {
-            // Pattern didn't match - this is normal for some Docker port formats
+          }
+        }
+
+        // Also check for internal-only ports
+        const containerInspection = await this.dockerApi.inspectContainer(containerId);
+        const exposedPorts = containerInspection.Config.ExposedPorts || {};
+        
+        for (const [exposedPort] of Object.entries(exposedPorts)) {
+          const [port, protocol] = exposedPort.split('/');
+          const portNum = parseInt(port, 10);
+          
+          // Check if this port is not already published
+          const isPublished = Object.keys(portBindings).includes(exposedPort);
+          
+          if (!isNaN(portNum) && !isPublished) {
+            ports.push({
+              source: "docker",
+              owner: containerName,
+              protocol: protocol || "tcp",
+              host_ip: "0.0.0.0",
+              host_port: portNum,
+              target: `${containerId.substring(0, 12)}:${portNum}(internal)`,
+              container_id: containerId,
+              vm_id: null,
+              app_id: containerId,
+              internal: true
+            });
           }
         }
       }
@@ -956,24 +967,24 @@ class TrueNASCollector extends BaseCollector {
         perf.start("pid-to-container-mapping");
         const pidToContainerMap = new Map();
         try {
-          const { stdout: inspectLines } = await execAsync(
-            `docker ps -q | xargs docker inspect --format '{{.State.Pid}}::{{.Id}}::{{.Name}}'`
-          );
-          inspectLines
-            .trim()
-            .split("\n")
-            .forEach((line) => {
-              if (!line) return;
-              const [pid, id, rawName] = line.split("::");
-              if (pid && id && rawName && pid !== "0") {
-                pidToContainerMap.set(parseInt(pid, 10), {
-                  id: id,
-                  name: rawName.startsWith("/")
-                    ? rawName.substring(1)
-                    : rawName,
+          await this.dockerApi._ensureConnected();
+          const containers = await this.dockerApi.listContainers();
+          
+          for (const container of containers) {
+            try {
+              const inspection = await this.dockerApi.inspectContainer(container.ID);
+              const pid = inspection.State.Pid;
+              if (pid && pid !== 0) {
+                pidToContainerMap.set(pid, {
+                  id: container.ID,
+                  name: container.Names,
                 });
               }
-            });
+            } catch (inspectErr) {
+              this.logWarn(`Failed to inspect container ${container.ID} for PID mapping: ${inspectErr.message}`);
+            }
+          }
+          
           this.log(
             `Successfully built PID-to-Container map with ${pidToContainerMap.size} entries.`
           );
@@ -1084,27 +1095,25 @@ class TrueNASCollector extends BaseCollector {
             port.source === "system"
           ) {
             try {
-              const { stdout } = await execAsync(
-                'docker ps --filter "name=portracker" --format "{{.ID}}|{{.Names}}"'
-              );
-              const lines = stdout.trim().split("\n");
+              await this.dockerApi._ensureConnected();
+              const containers = await this.dockerApi.listContainers();
+              const portrackerContainer = containers.find(c => c.Names.includes('portracker'));
 
-              if (lines.length > 0 && lines[0]) {
-                const [containerId, containerName] = lines[0].split("|");
+              if (portrackerContainer) {
+                const containerId = portrackerContainer.ID;
+                const containerName = portrackerContainer.Names;
 
-                if (containerId) {
-                  this.log(
-                    `Re-classifying our own application port ${ourPort} from system/node to ${containerName}`
-                  );
-                  port.source = "docker";
-                  port.owner = containerName;
-                  port.container_id = containerId;
-                  port.app_id = containerId;
-                  port.target = port.host_port;
+                this.log(
+                  `Re-classifying our own application port ${ourPort} from system/node to ${containerName}`
+                );
+                port.source = "docker";
+                port.owner = containerName;
+                port.container_id = containerId;
+                port.app_id = containerId;
+                port.target = port.host_port;
 
-                  port.created =
-                    containerCreationTimeMap.get(containerId) || port.created;
-                }
+                port.created =
+                  containerCreationTimeMap.get(containerId) || port.created;
               }
             } catch (e) {
               this.logWarn(
@@ -1369,10 +1378,22 @@ class TrueNASCollector extends BaseCollector {
       const hostContainerIds = await this._getCachedOrFresh(
         "hostNetworkContainers",
         async () => {
-          const { stdout } = await execAsync(
-            `docker ps --filter network=host --format '{{.ID}}'`
-          );
-          return stdout.trim().split("\n").filter(Boolean);
+          await this.dockerApi._ensureConnected();
+          const containers = await this.dockerApi.listContainers();
+          const hostContainers = [];
+          
+          for (const container of containers) {
+            try {
+              const inspection = await this.dockerApi.inspectContainer(container.ID);
+              if (inspection.HostConfig.NetworkMode === 'host') {
+                hostContainers.push(container.ID);
+              }
+            } catch (inspectErr) {
+              this.logWarn(`Failed to inspect container ${container.ID} for network mode: ${inspectErr.message}`);
+            }
+          }
+          
+          return hostContainers;
         },
         120000 // 2 minute cache
       );
@@ -1392,34 +1413,17 @@ class TrueNASCollector extends BaseCollector {
 
       for (const containerId of hostContainerIds) {
         try {
-          // Use standard, compatible ps flags. We ask for PID and command.
-          const { stdout: topOutput } = await execAsync(
-            `docker top ${containerId} -eo pid,comm`
-          );
+          await this.dockerApi._ensureConnected();
+          const pids = await this.dockerApi.getContainerProcesses(containerId);
+          const containerName = idToNameMap.get(containerId.substring(0, 12)) || `container-${containerId.substring(0, 12)}`;
 
-          const lines = topOutput.trim().split("\n").slice(1); // Skip header
-          for (const line of lines) {
-            const parts = line.trim().split(/\s+/);
-            if (parts.length < 1) continue;
-
-            const pid = parseInt(parts[0], 10);
-            const command = parts.slice(1).join(" ");
-
-            // We are interested in the main process, not system/root processes.
-            if (
-              !isNaN(pid) &&
-              pid > 0 &&
-              command !== "sh" &&
-              command !== "bash"
-            ) {
+          for (const pid of pids) {
+            if (pid > 0) {
               const fullId = dockerContainers.find((c) =>
                 c.id.startsWith(containerId)
               )?.id;
-              const containerName = idToNameMap.get(
-                containerId.substring(0, 12)
-              );
+              
               if (fullId && containerName) {
-                // On host-networked containers, the PID inside is the PID outside.
                 pidToContainerMap.set(pid, {
                   id: fullId,
                   name: containerName,
@@ -1428,9 +1432,8 @@ class TrueNASCollector extends BaseCollector {
             }
           }
         } catch (err) {
-          // Log the error but don't crash the whole collection.
           this.logWarn(
-            `Could not run 'docker top' for container ${containerId.substring(
+            `Could not get container processes for ${containerId.substring(
               0,
               12
             )}. It may have stopped.`,
@@ -1476,14 +1479,16 @@ class TrueNASCollector extends BaseCollector {
 
     try {
       this.log(
-        "Collecting TrueNAS system info via Docker host information (hybrid approach)"
+        "Collecting TrueNAS system info via Docker API"
       );
 
       perf.start("docker-version-info");
-      const { stdout: versionOutput } = await execAsync("docker version");
-      const { stdout: infoOutput } = await execAsync("docker info");
-      const serverVersion = this._extractDockerVersion(versionOutput);
-      const dockerInfo = this._parseDockerInfo(infoOutput);
+      await this.dockerApi._ensureConnected();
+      const [versionInfo, systemInfo] = await Promise.all([
+        this.dockerApi.getSystemVersion(),
+        this.dockerApi.getSystemInfo()
+      ]);
+      const serverVersion = versionInfo.server;
       perf.end("docker-version-info");
 
       perf.start("proc-meminfo");
@@ -1507,8 +1512,8 @@ class TrueNASCollector extends BaseCollector {
           "Failed to get memory info from /proc/meminfo:",
           memErr.message
         );
-        totalMemoryGB = dockerInfo.memory
-          ? (dockerInfo.memory / (1024 * 1024 * 1024)).toFixed(2)
+        totalMemoryGB = systemInfo.MemTotal
+          ? systemInfo.MemTotal
           : 0;
       }
       perf.end("proc-meminfo");
@@ -1577,11 +1582,11 @@ class TrueNASCollector extends BaseCollector {
         if (versionFile.trim()) {
           truenasVersion = versionFile.trim();
         } else if (
-          dockerInfo.kernelVersion &&
-          dockerInfo.kernelVersion.includes("truenas")
+          systemInfo.KernelVersion &&
+          systemInfo.KernelVersion.includes("truenas")
         ) {
           // Try to extract version from kernel if possible
-          const versionMatch = dockerInfo.kernelVersion.match(
+          const versionMatch = systemInfo.KernelVersion.match(
             /truenas-(\d+\.\d+\.\d+)/i
           );
           if (versionMatch && versionMatch[1]) {
@@ -1610,23 +1615,23 @@ class TrueNASCollector extends BaseCollector {
 
       return {
         type: "system",
-        hostname: dockerInfo.name || "truenas-system",
+        hostname: systemInfo.Name || "truenas-system",
         platform: "truenas",
         version: truenasVersion,
         system_product: systemProduct,
         enhanced: false,
-        kernel_version: dockerInfo.kernelVersion,
+        kernel_version: systemInfo.KernelVersion,
         operating_system: formattedOS,
-        os_type: dockerInfo.osType,
-        architecture: dockerInfo.architecture,
-        ncpu: dockerInfo.cpus,
+        os_type: systemInfo.OSType,
+        architecture: systemInfo.Architecture,
+        ncpu: systemInfo.NCPU,
         memory: totalMemoryGB,
         model: cpuModel,
         uptime: uptime,
         uptime_seconds: uptimeSeconds,
-        containers_running: dockerInfo.containersRunning,
-        containers_total: dockerInfo.containers,
-        docker_images: dockerInfo.images,
+        containers_running: systemInfo.ContainersRunning,
+        containers_total: systemInfo.Containers,
+        docker_images: systemInfo.Images,
         platform_data: {
           description: `TrueNAS SCALE${
             truenasVersion ? ` ${truenasVersion}` : ""
@@ -1646,98 +1651,6 @@ class TrueNASCollector extends BaseCollector {
       );
       return this._getFallbackSystemInfo();
     }
-  }
-
-  /**
-   * Parse Docker version output to extract server version (copied from DockerCollector)
-   * @param {string} output Docker version command output
-   * @returns {string} Server version
-   */
-  _extractDockerVersion(output) {
-    const lines = output.split("\n");
-    let inServerSection = false;
-    for (const line of lines) {
-      if (line.trim().startsWith("Server:")) {
-        inServerSection = true;
-        continue;
-      }
-      if (inServerSection && line.trim().startsWith("Version:")) {
-        return line.split(":")[1].trim();
-      }
-    }
-    return "unknown";
-  }
-
-  /**
-   * Parse Docker info output to extract system information (copied from DockerCollector)
-   * @param {string} output Docker info command output
-   * @returns {Object} Parsed information
-   */
-  _parseDockerInfo(output) {
-    const lines = output.split("\n");
-    const info = {
-      name: "",
-      containersRunning: 0,
-      containers: 0,
-      images: 0,
-      kernelVersion: "",
-      operatingSystem: "",
-      osType: "",
-      architecture: "",
-      cpus: 0,
-      memory: 0,
-      storageDriver: "",
-      loggingDriver: "",
-      cgroupDriver: "",
-      swarmStatus: "inactive",
-    };
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (trimmedLine.startsWith("Name:")) {
-        info.name = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Containers:")) {
-        info.containers = parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Running:")) {
-        info.containersRunning =
-          parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Images:")) {
-        info.images = parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Kernel Version:")) {
-        info.kernelVersion = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Operating System:")) {
-        info.operatingSystem = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("OSType:")) {
-        info.osType = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Architecture:")) {
-        info.architecture = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("CPUs:")) {
-        info.cpus = parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Total Memory:")) {
-        const memParts = trimmedLine.split(":")[1].trim().split(" ");
-        if (memParts.length >= 1) {
-          const value = parseFloat(memParts[0]);
-          const unit = memParts[1] || "B";
-          if (unit.toUpperCase() === "GIB") {
-            info.memory = value * 1024 * 1024 * 1024;
-          } else if (unit.toUpperCase() === "MIB") {
-            info.memory = value * 1024 * 1024;
-          } else if (unit.toUpperCase() === "KIB") {
-            info.memory = value * 1024;
-          } else {
-            info.memory = value;
-          }
-        }
-      } else if (trimmedLine.startsWith("Storage Driver:")) {
-        info.storageDriver = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Logging Driver:")) {
-        info.loggingDriver = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Cgroup Driver:")) {
-        info.cgroupDriver = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Swarm:")) {
-        info.swarmStatus = trimmedLine.split(":")[1].trim();
-      }
-    }
-    return info;
   }
 
   /**
@@ -1910,22 +1823,18 @@ class TrueNASCollector extends BaseCollector {
    */
   async _getDockerNameToIdMap() {
     try {
-      const { stdout } = await execAsync(
-        'docker ps --no-trunc --format "{{.Names}}\t{{.ID}}"'
-      );
+      await this.dockerApi._ensureConnected();
+      const containers = await this.dockerApi.listContainers();
       const nameToId = new Map();
 
-      stdout
-        .trim()
-        .split("\n")
-        .forEach((line) => {
-          if (line.trim()) {
-            const [name, id] = line.split("\t");
-            if (name && id) {
-              nameToId.set(name, id);
-            }
+      containers.forEach((container) => {
+        const names = container.Names.split(',');
+        names.forEach(name => {
+          if (name) {
+            nameToId.set(name.trim(), container.ID);
           }
         });
+      });
 
       return nameToId;
     } catch (err) {

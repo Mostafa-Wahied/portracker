@@ -13,6 +13,7 @@ const execAsync = util.promisify(exec);
 const fs = require("fs");
 const os = require("os");
 const ProcParser = require("../lib/proc-parser");
+const DockerAPIClient = require("../lib/docker-api");
 
 class DockerCollector extends BaseCollector {
   /**
@@ -25,39 +26,61 @@ class DockerCollector extends BaseCollector {
     this.platformName = "Docker";
     this.name = "Docker Collector";
     this.procParser = new ProcParser();
+    this.dockerApi = new DockerAPIClient();
+  }
+
+  async initialize() {
+    return await this.dockerApi.connect();
   }
 
   /**
-   * Get Docker system information
+   * Initialize Docker API (async initialization)
+   * @private
+   */
+  async _initializeDocker() {
+    try {
+      return await this.dockerApi.connect();
+    } catch (error) {
+      this.logWarn('Docker API initialization failed:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Get Docker system information using structured API data
    * @returns {Promise<Object>} System information
    */
   async getSystemInfo() {
     try {
-      const { stdout: versionOutput } = await execAsync("docker version");
-      const { stdout: infoOutput } = await execAsync("docker info");
-      const serverVersion = this._extractDockerVersion(versionOutput);
-      const info = this._parseDockerInfo(infoOutput);
+      await this.dockerApi._ensureConnected();
+      const [versionInfo, systemInfo] = await Promise.all([
+        this.dockerApi.getSystemVersion(),
+        this.dockerApi.getSystemInfo()
+      ]);
+
+      const serverVersion = versionInfo.server;
+      
       return {
         type: "system",
-        hostname: info.name || "docker-host",
+        hostname: systemInfo.Name || "docker-host",
         version: serverVersion || "unknown",
         platform: "docker",
         docker_version: serverVersion,
-        containers_running: info.containersRunning || 0,
-        containers_total: info.containers || 0,
-        images: info.images || 0,
-        kernel_version: info.kernelVersion,
-        operating_system: info.operatingSystem,
-        os_type: info.osType,
-        architecture: info.architecture,
-        ncpu: info.cpus || 0,
-        memory: info.memory || 0,
+        containers_running: systemInfo.ContainersRunning || 0,
+        containers_total: systemInfo.Containers || 0,
+        images: systemInfo.Images || 0,
+        kernel_version: systemInfo.KernelVersion,
+        operating_system: systemInfo.OperatingSystem,
+        os_type: systemInfo.OSType,
+        architecture: systemInfo.Architecture,
+        ncpu: systemInfo.NCPU || 0,
+        memory: systemInfo.MemTotal || 0,
         platform_data: {
           description: `Docker ${serverVersion}`,
-          storage_driver: info.storageDriver,
-          logging_driver: info.loggingDriver,
-          cgroup_driver: info.cgroupDriver,
-          swarm_status: info.swarmStatus || "inactive",
+          storage_driver: systemInfo.Driver,
+          logging_driver: systemInfo.LoggingDriver,
+          cgroup_driver: systemInfo.CgroupDriver,
+          swarm_status: systemInfo.Swarm?.LocalNodeState || "inactive",
         },
       };
     } catch (err) {
@@ -76,171 +99,6 @@ class DockerCollector extends BaseCollector {
     }
   }
 
-  /**
-   * Parse Docker version output to extract server version
-   * @param {string} output Docker version command output
-   * @returns {string} Server version
-   */
-  _extractDockerVersion(output) {
-    const lines = output.split("\n");
-    let inServerSection = false;
-
-    for (const line of lines) {
-      if (line.trim().startsWith("Server:")) {
-        inServerSection = true;
-        continue;
-      }
-
-      if (inServerSection && line.trim().startsWith("Version:")) {
-        return line.split(":")[1].trim();
-      }
-    }
-
-    return "unknown";
-  }
-
-  /**
-   * Parse Docker info output to extract system information
-   * @param {string} output Docker info command output
-   * @returns {Object} Parsed information
-   */
-  _parseDockerInfo(output) {
-    const lines = output.split("\n");
-    const info = {
-      name: "",
-      containersRunning: 0,
-      containers: 0,
-      images: 0,
-      kernelVersion: "",
-      operatingSystem: "",
-      osType: "",
-      architecture: "",
-      cpus: 0,
-      memory: 0,
-      storageDriver: "",
-      loggingDriver: "",
-      cgroupDriver: "",
-      swarmStatus: "inactive",
-    };
-
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-
-      if (trimmedLine.startsWith("Name:")) {
-        info.name = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Containers:")) {
-        info.containers = parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Running:")) {
-        info.containersRunning =
-          parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Images:")) {
-        info.images = parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Kernel Version:")) {
-        info.kernelVersion = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Operating System:")) {
-        info.operatingSystem = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("OSType:")) {
-        info.osType = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Architecture:")) {
-        info.architecture = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("CPUs:")) {
-        info.cpus = parseInt(trimmedLine.split(":")[1].trim(), 10) || 0;
-      } else if (trimmedLine.startsWith("Total Memory:")) {
-        const memString = trimmedLine.split(":")[1].trim();
-        const valueMatch = memString.match(/([\d.]+)/);
-
-        if (valueMatch) {
-          let value = parseFloat(valueMatch[1]);
-          const unit = (memString.match(/[a-zA-Z]+/) || [""])[0].toUpperCase();
-
-          const unitMap = {
-            GIB: 1024 * 1024 * 1024,
-            GB: 1000 * 1000 * 1000,
-            MIB: 1024 * 1024,
-            MB: 1000 * 1000,
-            KIB: 1024,
-            KB: 1000,
-            B: 1,
-          };
-
-          if (unitMap[unit]) {
-            info.memory = Math.round(value * unitMap[unit]);
-          } else {
-            if (value < 1024) {
-              info.memory = Math.round(value * 1024 * 1024 * 1024);
-            } else {
-              info.memory = Math.round(value);
-            }
-          }
-        } else {
-          info.memory = 0;
-        }
-      } else if (trimmedLine.startsWith("Storage Driver:")) {
-        info.storageDriver = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Logging Driver:")) {
-        info.loggingDriver = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Cgroup Driver:")) {
-        info.cgroupDriver = trimmedLine.split(":")[1].trim();
-      } else if (trimmedLine.startsWith("Swarm:")) {
-        info.swarmStatus = trimmedLine.split(":")[1].trim();
-      }
-    }
-
-    return info;
-  }
-
-  /**
-   * Parse `docker ps` output to extract port information.
-   * @param {string} output The raw output from the `docker ps` command.
-   * @returns {Array} A list of normalized port entries.
-   */
-  parseDockerOutput(output) {
-    const entries = [];
-    if (!output) return entries;
-
-    const lines = output.trim().split("\n");
-    for (const line of lines) {
-      if (!line) continue;
-
-      const [name, portsStr, id] = line.split(":::");
-      if (!portsStr) continue;
-
-      const portMappings = portsStr.split(", ");
-      for (const mapping of portMappings) {
-        const [hostPart, targetPart] = mapping.split("->");
-        if (!hostPart || !targetPart) continue;
-
-        const targetMatch = targetPart.match(/(\d+)\/(tcp|udp)/);
-        if (!targetMatch) continue;
-
-        const targetPort = parseInt(targetMatch[1], 10);
-        const protocol = targetMatch[2];
-
-        const lastColonIndex = hostPart.lastIndexOf(":");
-        if (lastColonIndex === -1) continue;
-
-        const hostIp = hostPart.substring(0, lastColonIndex);
-        const hostPort = parseInt(hostPart.substring(lastColonIndex + 1), 10);
-
-        if (!hostIp || isNaN(hostPort)) continue;
-
-        entries.push(
-          this.normalizePortEntry({
-            source: "docker",
-            owner: name,
-            protocol: protocol,
-            host_ip: hostIp,
-            host_port: hostPort,
-            target: targetPort,
-            container_id: id,
-            app_id: id,
-            pids: [],
-          })
-        );
-      }
-    }
-    return entries;
-  }
 
   /**
    * Get Docker applications (containers)
@@ -248,22 +106,16 @@ class DockerCollector extends BaseCollector {
    */
   async getApplications() {
     try {
-      const { stdout } = await execAsync('docker ps -a --format "{{json .}}"');
-      const containers = stdout
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-
+      const containers = await this.dockerApi.listContainers();
       return containers.map((container) => ({
         type: "application",
         id: container.ID,
-        name: container.Names,
+        name: container.Names, // This is already a string from listContainers()
         status: container.State,
         version: "N/A",
         image: container.Image,
         command: container.Command,
-        created: container.CreatedAt,
+        created: container.Created,
         platform: "docker",
         platform_data: {
           type: "container",
@@ -421,10 +273,53 @@ class DockerCollector extends BaseCollector {
    */
   async _getDockerContainerPorts() {
     try {
-      const { stdout: dockerOutput } = await execAsync(
-        'docker ps --format "{{.Names}}:::{{.Ports}}:::{{.ID}}"'
-      );
-      return this.parseDockerOutput(dockerOutput);
+      const containers = await this.dockerApi.listContainers();
+      const portEntries = [];
+
+      for (const container of containers) {
+        const containerName = container.Names;
+        const containerId = container.ID;
+        
+        // Skip containers without port mappings
+        if (!container.Ports || container.Ports.length === 0) {
+          continue;
+        }
+
+        // Use the raw port data from dockerode instead of CLI parsing
+        const rawPorts = await this.dockerApi.docker.getContainer(container.ID).inspect();
+        const portBindings = rawPorts.NetworkSettings.Ports || {};
+
+        // Process each port mapping
+        for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
+          if (!hostBindings) continue;
+          
+          const [port, protocol] = containerPort.split('/');
+          const targetPort = parseInt(port, 10);
+
+          for (const binding of hostBindings) {
+            const hostIp = binding.HostIp || '0.0.0.0';
+            const hostPort = parseInt(binding.HostPort, 10);
+
+            if (!hostIp || isNaN(hostPort)) continue;
+
+            portEntries.push(
+              this.normalizePortEntry({
+                source: "docker",
+                owner: containerName,
+                protocol: protocol,
+                host_ip: hostIp,
+                host_port: hostPort,
+                target: `${containerId}:${targetPort}`,
+                container_id: containerId,
+                app_id: containerName,
+                pids: [],
+              })
+            );
+          }
+        }
+      }
+
+      return portEntries;
     } catch (err) {
       this.logWarn("Failed to get Docker container ports:", err.message);
       return [];
@@ -439,41 +334,25 @@ class DockerCollector extends BaseCollector {
    */
   async _getHostNetworkContainers() {
     try {
-      const { stdout } = await execAsync(
-        'docker ps --format "{{.ID}}:::{{.Names}}:::{{.Image}}"'
-      );
-      const lines = stdout.trim().split("\n").filter(Boolean);
+      const containerList = await this.dockerApi.listContainers();
 
-      if (lines.length === 0) {
+      if (containerList.length === 0) {
         return [];
       }
 
-      const promises = lines.map(async (line) => {
-        const [containerId, containerName, image] = line.split(":::");
+      const promises = containerList.map(async (container) => {
+        const containerId = container.ID;
+        const containerName = container.Names;
+        const image = container.Image;
 
         try {
-          const [inspectResult, pids] = await Promise.all([
-            execAsync(
-              `docker inspect ${containerId} --format "{{.HostConfig.NetworkMode}}:::{{json .Config.ExposedPorts}}"`
-            ),
+          const [inspection, pids] = await Promise.all([
+            this.dockerApi.inspectContainer(containerId),
             this._getContainerProcesses(containerId),
           ]);
 
-          const inspectOutput = inspectResult.stdout.trim();
-          const parts = inspectOutput.split(":::");
-          const networkMode = parts[0];
-          const exposedPortsJson =
-            parts.length > 1 ? parts.slice(1).join(":::") : "null";
-
-          let exposedPorts;
-          try {
-            exposedPorts = JSON.parse(exposedPortsJson);
-          } catch (e) {
-            this.logWarn(
-              `Could not parse ExposedPorts JSON for container ${containerId}: ${exposedPortsJson}`
-            );
-            exposedPorts = null;
-          }
+          const networkMode = inspection.HostConfig?.NetworkMode || '';
+          const exposedPorts = inspection.Config?.ExposedPorts || {};
 
           const internalPorts = [];
           if (exposedPorts && typeof exposedPorts === 'object') {
@@ -514,8 +393,8 @@ class DockerCollector extends BaseCollector {
         }
       });
 
-      const containers = (await Promise.all(promises)).filter(Boolean);
-      return containers;
+      const finalContainers = (await Promise.all(promises)).filter(Boolean);
+      return finalContainers;
     } catch (err) {
       this.logWarn("Failed to get host network containers:", err.message);
       return [];
@@ -530,13 +409,7 @@ class DockerCollector extends BaseCollector {
    */
   async _getContainerProcesses(containerId) {
     try {
-      const { stdout } = await execAsync(`docker top ${containerId} -o pid`);
-      const lines = stdout.trim().split("\n");
-      const pids = lines
-        .slice(1)
-        .map((line) => parseInt(line.trim(), 10))
-        .filter((pid) => !isNaN(pid));
-      return pids;
+      return await this.dockerApi.getContainerProcesses(containerId);
     } catch (err) {
       this.logWarn(
         `Failed to get processes for container ${containerId}:`,
@@ -555,19 +428,30 @@ class DockerCollector extends BaseCollector {
    */
   async _checkIfPortBelongsToDocker(port) {
     try {
-      const { stdout: portCheck } = await execAsync(
-        `docker ps --filter "publish=${port.host_port}" --format "{{.Names}}:::{{.ID}}" 2>/dev/null || echo ""`
-      );
-
-      if (portCheck.trim()) {
-        const [containerName, containerId] = portCheck.trim().split(":::");
-        return {
-          containerName: containerName,
-          containerId: containerId,
-          target: `${containerId.substring(0, 12)}:${port.host_port}`,
-        };
+      // Use Docker API to find containers with published ports
+      const containers = await this.dockerApi.listContainers();
+      
+      for (const container of containers) {
+        // Check if this container publishes the port we're looking for
+        const inspection = await this.dockerApi.inspectContainer(container.ID);
+        const portBindings = inspection.NetworkSettings?.Ports || {};
+        
+        for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
+          if (!hostBindings) continue;
+          
+          for (const binding of hostBindings) {
+            if (parseInt(binding.HostPort, 10) === port.host_port) {
+              return {
+                containerName: container.Names,
+                containerId: container.ID,
+                target: `${container.ID}:${port.host_port}`,
+              };
+            }
+          }
+        }
       }
 
+      // If not found by published ports, try to find by process name
       if (port.owner && port.owner !== "unknown") {
         const containerInfo = await this._getContainerByProcessName(
           port.owner,
@@ -616,17 +500,17 @@ class DockerCollector extends BaseCollector {
           : null;
 
         if (fullContainerId) {
-          const { stdout: nameOutput } = await execAsync(
-            `docker ps --filter "id=${fullContainerId}" --format "{{.Names}}" 2>/dev/null || echo ""`
-          );
-          const containerName = nameOutput.trim();
+          try {
+            const inspection = await this.dockerApi.inspectContainer(fullContainerId);
+            const containerName = inspection.Name.replace(/^\//, '');
 
-          if (containerName) {
             return {
               containerName: containerName,
               containerId: fullContainerId,
               target: `${fullContainerId.substring(0, 12)}:internal`,
             };
+          } catch (err) {
+            this.logWarn(`Could not inspect container ${fullContainerId}:`, err.message);
           }
         }
       }
@@ -647,12 +531,12 @@ class DockerCollector extends BaseCollector {
    */
   async _getContainerByProcessName(processName, port) {
     try {
-      const { stdout } = await execAsync(
-        'docker ps --format "{{.Names}}:::{{.ID}}:::{{.Image}}"'
-      );
+      const containers = await this.dockerApi.listContainers();
 
-      for (const line of stdout.trim().split("\n").filter(Boolean)) {
-        const [containerName, containerId, image] = line.split(":::");
+      for (const container of containers) {
+        const containerName = container.Names;
+        const containerId = container.ID;
+        const image = container.Image;
 
         const nameLower = containerName.toLowerCase();
         const imageLower = image.toLowerCase();
@@ -758,8 +642,8 @@ class DockerCollector extends BaseCollector {
                       port.container_id = containerId;
                       port.source = 'docker';
                       try {
-                        const { stdout } = await execAsync(`docker inspect --format '{{.Name}}' ${containerId}`);
-                        port.owner = stdout.trim().replace(/^\//, '');
+                        const inspection = await this.dockerApi.inspectContainer(containerId);
+                        port.owner = inspection.Name.replace(/^\//, '');
                       } catch (err) {
                         // Container might have been removed
                       }
@@ -986,7 +870,7 @@ class DockerCollector extends BaseCollector {
     }
 
     try {
-      await execAsync("docker version");
+      await this.dockerApi.version();
       this.logInfo(
         "Docker command is available on the host. Assigning compatibility score (40)."
       );
