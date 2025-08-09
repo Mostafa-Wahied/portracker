@@ -120,17 +120,7 @@ if (!tableExists) {
           FOREIGN KEY (parentId) REFERENCES servers(id)
         );
       `);
-      for (const server of existingServers) {
-        const insertColumns = Object.keys(server)
-          .filter((key) => key !== "type")
-          .join(", ");
-        const placeholders = Object.keys(server)
-          .filter((key) => key !== "type")
-          .map(() => "?")
-          .join(", ");
-        const values = Object.keys(server)
-          .filter((key) => key !== "type")
-          .map((key) => server[key]);
+  for (const server of existingServers) {
         // Assumes 'id', 'label', 'url' are always present in old data
         db.prepare(
           `

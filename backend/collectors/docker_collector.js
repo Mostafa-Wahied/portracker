@@ -289,8 +289,8 @@ class DockerCollector extends BaseCollector {
         const rawPorts = await this.dockerApi.docker.getContainer(container.ID).inspect();
         const portBindings = rawPorts.NetworkSettings.Ports || {};
 
-        // Process each port mapping
-        for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
+  // Process each port mapping
+  for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
           if (!hostBindings) continue;
           
           const [port, protocol] = containerPort.split('/');
@@ -436,7 +436,7 @@ class DockerCollector extends BaseCollector {
         const inspection = await this.dockerApi.inspectContainer(container.ID);
         const portBindings = inspection.NetworkSettings?.Ports || {};
         
-        for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
+  for (const [, hostBindings] of Object.entries(portBindings)) {
           if (!hostBindings) continue;
           
           for (const binding of hostBindings) {
@@ -488,9 +488,9 @@ class DockerCollector extends BaseCollector {
         cgroupOutput.includes("docker") ||
         cgroupOutput.includes("containerd")
       ) {
-        const dockerMatch = cgroupOutput.match(/docker[\/\-]([a-f0-9]{64})/);
+        const dockerMatch = cgroupOutput.match(/docker[/-]([a-f0-9]{64})/);
         const containerdMatch = cgroupOutput.match(
-          /containerd[\/\-]([a-f0-9]{64})/
+          /containerd[/-]([a-f0-9]{64})/
         );
 
         const fullContainerId = dockerMatch
@@ -645,7 +645,7 @@ class DockerCollector extends BaseCollector {
                         const inspection = await this.dockerApi.inspectContainer(containerId);
                         port.owner = inspection.Name.replace(/^\//, '');
                       } catch (err) {
-                        // Container might have been removed
+                        this.logWarn("Container inspection failed during /proc attribution:", err.message);
                       }
                     }
                   }
@@ -865,8 +865,8 @@ class DockerCollector extends BaseCollector {
         );
         return 50;
       }
-    } catch (e) {
-      this.logWarn("Could not stat /var/run/docker.sock. Is it mounted?");
+    } catch (err) {
+      this.logWarn("Could not stat /var/run/docker.sock. Is it mounted?", err.message);
     }
 
     try {
@@ -876,7 +876,7 @@ class DockerCollector extends BaseCollector {
       );
       return 40;
     } catch (err) {
-      this.logInfo("Docker command not found or failed.");
+      this.logInfo("Docker command not found or failed.", err.message);
     }
 
     this.logInfo("No Docker indicators found. Incompatible (score 0).");

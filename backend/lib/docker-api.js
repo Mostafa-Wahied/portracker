@@ -63,7 +63,7 @@ class DockerAPIClient {
       this.logger.info(`Docker API connected successfully (${this.deploymentPattern})`);
       return true;
     } catch (error) {
-      this.logger.error(`Docker API connection failed (${this.deploymentPattern}):`, error.message);
+    this.logger.error(`Docker API connection failed (${this.deploymentPattern})`, { err: error });
       this.isConnected = false;
       return false;
     }
@@ -198,7 +198,7 @@ class DockerAPIClient {
         arch: versionInfo.Arch || 'unknown'
       };
     } catch (error) {
-      this.logger.error('getSystemVersion failed:', error.message);
+    this.logger.error('getSystemVersion failed', { err: error });
       throw error;
     }
   }

@@ -1042,7 +1042,7 @@ class TrueNASCollector extends BaseCollector {
 
         for (const port of dockerPorts) {
           // Use different key pattern for internal vs external ports
-          const key = port.internal 
+          const key = port.internal
             ? `${port.container_id}:${port.host_port}:internal`
             : `${port.host_ip}:${port.host_port}`;
           port.created =
@@ -1259,6 +1259,7 @@ class TrueNASCollector extends BaseCollector {
             try {
               this.client.close();
             } catch (closeErr) {
+              this.logWarn("Error while closing TrueNAS client:", closeErr.message);
             }
           }
         }
@@ -1498,7 +1499,7 @@ class TrueNASCollector extends BaseCollector {
         this.dockerApi.getSystemVersion(),
         this.dockerApi.getSystemInfo()
       ]);
-      const serverVersion = versionInfo.server;
+  // serverVersion may be available via versionInfo.server, but not required here
       perf.end("docker-version-info");
 
       perf.start("proc-meminfo");

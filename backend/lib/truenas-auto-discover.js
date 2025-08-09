@@ -191,7 +191,7 @@ function callSocketMethod(socketPath, method, options = {}) {
  * @param {boolean} [options.appDebugEnabled=false] - Whether application-level debug is enabled
  * @returns {Array<string>} Host addresses to try
  */
-function detectHostAddresses(options = {}) {
+function detectHostAddresses() {
   const hostAddresses = [];
 
   hostAddresses.push("127.0.0.1", "localhost");
