@@ -99,7 +99,7 @@ function PortCardComponent({
                   <ExternalLink className="w-4 h-4 text-indigo-600 dark:text-indigo-400 opacity-0 group-hover/link:opacity-100 transition-opacity" />
                 </a>
               </TooltipTrigger>
-              {port.target && (
+              {!port.internal && port.target && (
                 <TooltipContent>
                   {searchMatches.target ? (
                     <span>
