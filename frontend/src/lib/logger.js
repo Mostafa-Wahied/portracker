@@ -99,7 +99,6 @@ class Logger {
   }
 }
 
-// Factory function for creating loggers (consistent with backend pattern)
 function LoggerFactory(componentName, options = {}) {
   return new Logger(componentName, options);
 }

@@ -119,7 +119,6 @@ class TrueNASClient {
 
     try {
       if (this.appDebugEnabled) {
-        // Avoid logging raw params for privacy/safety
         this.logger.debug(`Calling TrueNAS API method: ${method}`);
       }
       const result = await this.client(method, params);
