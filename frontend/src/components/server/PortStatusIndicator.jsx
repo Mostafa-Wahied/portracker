@@ -27,6 +27,14 @@ export function PortStatusIndicator({
     let pingApiUrl = `/api/ping?host_ip=${encodeURIComponent(
       port.host_ip
     )}&host_port=${port.host_port}`;
+
+    // Internal ports: inform backend to use container health
+    if (port.internal) {
+      pingApiUrl += `&internal=true`;
+      if (port.container_id) {
+        pingApiUrl += `&container_id=${encodeURIComponent(port.container_id)}`;
+      }
+    }
     
     if (port.owner) {
       pingApiUrl += `&owner=${encodeURIComponent(port.owner)}`;
@@ -66,7 +74,7 @@ export function PortStatusIndicator({
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [port.host_ip, port.host_port, port.owner, serverId, serverUrl, onProtocolChange]);
+  }, [port.host_ip, port.host_port, port.owner, port.internal, port.container_id, serverId, serverUrl, onProtocolChange]);
 
   const getDotState = () => {
     if (checking) {

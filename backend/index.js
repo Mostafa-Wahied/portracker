@@ -11,6 +11,7 @@ const cors = require("cors");
 const db = require("./db");
 const { createCollector, detectCollector } = require("./collectors");
 const { Logger } = require("./lib/logger");
+const DockerAPIClient = require("./lib/docker-api");
 const path = require("path");
 const net = require("net");
 const http = require("http");
@@ -20,6 +21,7 @@ const os = require("os");
 
 // Initialize logger for this component
 const logger = new Logger("Server", { debug: process.env.DEBUG === 'true' });
+const dockerApi = new DockerAPIClient();
 
 const PING_TIMEOUT = 2000;
 
@@ -1267,7 +1269,7 @@ app.get("/api/ignores", (req, res) => {
 });
 
 app.get("/api/ping", async (req, res) => {
-  const { host_ip, host_port, target_server_url, owner } = req.query;
+  const { host_ip, host_port, target_server_url, owner, internal, container_id } = req.query;
   const currentDebug = req.query.debug === "true";
   
   // Enable debug for this request if specified
@@ -1284,6 +1286,50 @@ app.get("/api/ping", async (req, res) => {
   }
   
   const serviceInfo = detectServiceType(host_port, owner);
+
+  if (internal === 'true' && container_id) {
+    try {
+      await dockerApi._ensureConnected?.();
+    } catch (_) {}
+    const health = await (dockerApi.getContainerHealth ? dockerApi.getContainerHealth(container_id) : Promise.resolve({ status: 'unknown', health: 'unknown' }));
+
+    const state = (health.status || '').toLowerCase();
+    const h = (health.health || '').toLowerCase();
+    let color = 'gray';
+    let status = 'unknown';
+    let title = 'Container status unknown';
+
+    if (state === 'running') {
+      if (h === 'healthy') {
+        color = 'green';
+        status = 'reachable';
+        title = 'Container healthy';
+      } else if (h === 'starting' || h === 'none' || h === 'unhealthy' || h === 'unknown') {
+        color = h === 'unhealthy' ? 'yellow' : 'yellow';
+        status = 'unknown';
+        title = h === 'unhealthy' ? 'Container unhealthy' : 'Container running';
+      } else {
+        color = 'yellow';
+        status = 'unknown';
+        title = 'Container running';
+      }
+    } else if (state === 'exited' || state === 'dead' || state === 'created') {
+      color = 'red';
+      status = 'unreachable';
+      title = 'Container not running';
+    }
+
+    return res.json({
+      reachable: color === 'green',
+      status,
+      color,
+      title,
+      protocol: null,
+      serviceType: 'service',
+      serviceName: serviceInfo.name,
+      description: 'Internal port status based on container health'
+    });
+  }
   
   if (serviceInfo.type === 'system') {
     return res.json({
