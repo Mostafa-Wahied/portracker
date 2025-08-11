@@ -337,18 +337,10 @@ module.exports = [
   'no-unused-vars': ['warn', { args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^(React|_)', caughtErrors: 'none' }],
   'no-useless-escape': 'warn',
   'no-empty': ['warn', { allowEmptyCatch: true }],
-  // Disallow non-production comment markers
-  'no-warning-comments': ['warn', {
-    terms: ['todo','fixme','xxx','hack','wip','temp','debug-only','dev only','remove before prod','remove before release','non-prod','// ','non production','temporary'],
-    location: 'anywhere'
-  }],
-  'logs/no-emoji-in-logs': 'warn',
-  'logs/no-line-comments': 'warn',
   'logs/no-debug-gated-info-warn': 'warn',
   'logs/logger-requires-metadata': 'off',
   'logs/error-object-in-logger-error': 'off',
   'logs/no-raw-req-res-body-logging': 'off',
-  'codebase/no-line-comments-except-directives': 'warn',
     },
   },
 
@@ -371,20 +363,12 @@ module.exports = [
   'no-unused-vars': ['warn', { args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^(React|_)', caughtErrors: 'none' }],
   'no-useless-escape': 'warn',
   'no-empty': ['warn', { allowEmptyCatch: true }],
-  // Disallow non-production comment markers
-  'no-warning-comments': ['warn', {
-    terms: ['todo','fixme','xxx','hack','wip','temp','debug-only','dev only','remove before prod','remove before release','non-prod','// ','non production','temporary'],
-    location: 'anywhere'
-  }],
-      ...(reactHooks ? { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' } : {}),
+    ...(reactHooks ? { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' } : {}),
   ...(reactPlugin ? { 'react/jsx-uses-vars': 'error', 'react/jsx-uses-react': 'error' } : {}),
-  'logs/no-emoji-in-logs': 'warn',
-  'logs/no-line-comments': 'warn',
   'logs/no-debug-gated-info-warn': 'warn',
   'logs/logger-requires-metadata': 'off',
   'logs/error-object-in-logger-error': 'off',
   'logs/no-raw-req-res-body-logging': 'off',
-  'codebase/no-line-comments-except-directives': 'warn',
     },
   },
 

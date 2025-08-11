@@ -866,7 +866,8 @@ class TrueNASCollector extends BaseCollector {
         this.logInfo("Basic system info collected via Docker commands");
       } catch (err) {
         this.logWarn(
-          "Basic system info collection encountered issues, using fallback data if available."
+          "Basic system info collection encountered issues, using fallback data if available.",
+          { error: err.message }
         );
         results.systemInfo = this._getFallbackSystemInfo();
       }
@@ -1441,7 +1442,8 @@ class TrueNASCollector extends BaseCollector {
       const { stdout } = await execAsync(`cat /proc/${pid}/status`);
       const ppidMatch = stdout.match(/^PPid:\s*(\d+)/m);
       return ppidMatch ? parseInt(ppidMatch[1], 10) : null;
-    } catch (e) {
+    } catch {
+      /* Process no longer exists or permission denied */
       return null;
     }
   }

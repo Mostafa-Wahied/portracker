@@ -28,6 +28,7 @@ class Logger {
         }
       }
     } catch {
+      /* No access to URLSearchParams - will check localStorage */
     }
     
     try {
@@ -37,6 +38,7 @@ class Logger {
         if (stored === 'false') return false;
       }
     } catch {
+      /* No access to localStorage - will return default */
     }
     
   return false;

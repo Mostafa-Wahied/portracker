@@ -58,6 +58,15 @@ export default function App() {
   );
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchScope, setSearchScope] = useState(() => {
+    try {
+      const saved = localStorage.getItem("searchScope");
+      if (saved === "all") return "all";
+      return "server";
+    } catch {
+      return "server";
+    }
+  });
   const [searchHighlighting, setSearchHighlighting] = useState(() => {
     try {
       const saved = localStorage.getItem("searchHighlighting");
@@ -189,6 +198,14 @@ export default function App() {
       logger.warn("Failed to save search highlighting setting:", error);
     }
   }, [searchHighlighting]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("searchScope", searchScope);
+    } catch (error) {
+      logger.warn("Failed to save search scope setting:", error);
+    }
+  }, [searchScope]);
 
   const handleSelectServer = useCallback((serverId) => {
     setSelectedServer(serverId);
@@ -957,6 +974,26 @@ export default function App() {
     );
   }
 
+  function renderAllMatchingServers() {
+    const matching = groups
+      .map((srv) => filterPorts(srv))
+      .filter((srv) => srv.ok && Array.isArray(srv.data) && srv.data.length > 0);
+
+    if (matching.length === 0) {
+      return (
+        <div className="text-center py-12 text-gray-500 dark:text-slate-400">
+          No matches across servers.
+        </div>
+      );
+    }
+
+    return matching.map((srv) => (
+      <div key={srv.id} className="space-y-8">
+        {renderServer(srv)}
+      </div>
+    ));
+  }
+
   const serverToRender = selectedServer
     ? groups.find((g) => g.id === selectedServer)
     : null;
@@ -973,6 +1010,8 @@ export default function App() {
           setAutoRefresh={setAutoRefresh}
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
+          searchScope={searchScope}
+          onSearchScopeChange={setSearchScope}
           searchHighlighting={searchHighlighting}
           onSearchHighlightingChange={setSearchHighlighting}
           filters={filters}
@@ -1010,17 +1049,21 @@ export default function App() {
               )}
 
               {!loading && !selectedServer && (
-                <div className="text-center py-24 text-slate-500 dark:text-slate-400 flex flex-col items-center">
-                  <BarChart3 className="h-16 w-16 mb-4 text-slate-400" />
-                  <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">
-                    Dashboard Home
-                  </h2>
-                  <p className="mt-2 max-w-md">
-                    Select a server from the sidebar to view its ports, system
-                    information, and more. Use the "Add Server" button to
-                    connect to new local or remote environments.
-                  </p>
-                </div>
+                searchTerm && searchScope === "all" ? (
+                  <div className="space-y-8">{renderAllMatchingServers()}</div>
+                ) : (
+                  <div className="text-center py-24 text-slate-500 dark:text-slate-400 flex flex-col items-center">
+                    <BarChart3 className="h-16 w-16 mb-4 text-slate-400" />
+                    <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">
+                      Dashboard Home
+                    </h2>
+                    <p className="mt-2 max-w-md">
+                      Select a server from the sidebar to view its ports, system
+                      information, and more. Use the "Add Server" button to
+                      connect to new local or remote environments.
+                    </p>
+                  </div>
+                )
               )}
 
               {!loading && noDataForSelection && (
@@ -1030,8 +1073,12 @@ export default function App() {
                 </div>
               )}
 
-              {!loading && serverToRender && (
+              {!loading && serverToRender && !(searchTerm && searchScope === "all") && (
                 <div className="space-y-8">{renderServer(serverToRender)}</div>
+              )}
+
+              {!loading && selectedServer && searchTerm && searchScope === "all" && (
+                <div className="space-y-8">{renderAllMatchingServers()}</div>
               )}
             </div>
           </main>

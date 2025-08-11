@@ -74,8 +74,8 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
         await navigator.clipboard.writeText(text);
         return true;
       }
-    } catch (_) {
-      
+    } catch {
+      /* Modern clipboard API not available or failed - will try fallback */
     }
     try {
       if (cmdRef.current) {
@@ -88,8 +88,8 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
         selection.removeAllRanges();
         if (ok) return true;
       }
-    } catch (_) {
-      
+    } catch {
+      /* Legacy execCommand failed - will try textarea fallback */
     }
     try {
       const ta = document.createElement("textarea");
@@ -105,7 +105,8 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
       const ok = document.execCommand("copy");
       document.body.removeChild(ta);
       return ok;
-    } catch (_) {
+    } catch {
+      /* Final fallback copy method also failed */
       return false;
     }
   }

@@ -26,7 +26,7 @@ class ProcParser {
         this.logger.debug(`Using /proc path: ${this.procPath}`);
         break;
   } catch {
-    
+    /* /proc path not accessible - will try next path */
       }
     }
     
@@ -70,6 +70,7 @@ class ProcParser {
       
       return hasDockerEnv && hasHostPidAccess;
     } catch (err) {
+      this.logger.debug("Error checking containerization status:", { error: err.message });
       return false;
     }
   }
@@ -264,10 +265,12 @@ class ProcParser {
                 
                 return { pid, name };
               }
-            } catch (err) {
+            } catch {
+              /* Process directory not accessible - will try next */
             }
           }
-        } catch (err) {
+        } catch {
+          /* /proc/pid/fd directory not accessible */
         }
       }
     } catch (err) {
@@ -287,7 +290,8 @@ class ProcParser {
       if (match) {
   return match[1].substring(0, 12);
       }
-    } catch (err) {
+    } catch {
+      /* /proc/pid/cgroup file not accessible */
     }
     
     return null;

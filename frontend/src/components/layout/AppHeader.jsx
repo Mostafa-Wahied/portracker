@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { RefreshCw, Loader2, Search, X, Sun, Moon, Menu } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { RefreshCw, Loader2, Search, X, Sun, Moon, Menu, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RefreshProgress } from "../ui/RefreshProgress";
@@ -13,10 +22,13 @@ export function AppHeader({
   setAutoRefresh,
   searchTerm,
   onSearchChange,
+  searchScope,
+  onSearchScopeChange,
   searchHighlighting,
   onSearchHighlightingChange,
   filters,
   onFilterChange,
+  selectedServer: _selectedServer,
   isDarkMode,
   onThemeToggle,
   onGoHome,
@@ -34,9 +46,7 @@ export function AppHeader({
         activeClass:
           "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
         onClick: () => onFilterChange({ ...filters, docker: !filters.docker }),
-        title: filters.docker
-          ? "Disable Docker filter"
-          : "Enable Docker filter",
+        title: filters.docker ? "Disable Docker filter" : "Enable Docker filter",
       },
       {
         key: "system",
@@ -45,9 +55,7 @@ export function AppHeader({
         activeClass:
           "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
         onClick: () => onFilterChange({ ...filters, system: !filters.system }),
-        title: filters.system
-          ? "Disable System filter"
-          : "Enable System filter",
+        title: filters.system ? "Disable System filter" : "Enable System filter",
       },
     ],
     [filters, onFilterChange]
@@ -93,11 +101,8 @@ export function AppHeader({
   }, [searchTerm]);
 
   const getInputPadding = () => {
-    const hasToggle = !!searchTerm;
     const hasClear = !!localSearchTerm;
-
-    if (hasToggle && hasClear) return "pr-20";
-    if (hasToggle || hasClear) return "pr-12";
+    if (hasClear) return "pr-12";
     return "pr-10";
   };
 
@@ -125,156 +130,166 @@ export function AppHeader({
           </button>
         </div>
 
-        <div className="flex items-center flex-wrap justify-center md:justify-end gap-x-4 gap-y-2">
-          <div className="relative">
+        <div className="flex items-center flex-wrap justify-center md:justify-end gap-x-4 gap-y-2 w-full md:w-auto">
+          <div className="relative w-full md:w-auto">
             <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
               {searchIcon}
             </div>
             <Input
               type="text"
               placeholder="Search ports, processes..."
-              className={`pl-10 ${getInputPadding()} w-64 border-gray-300 dark:border-gray-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
+              className={`pl-10 ${getInputPadding()} w-full max-w-[36rem] sm:max-w-[28rem] md:max-w-[32rem] lg:max-w-[40rem] border-gray-300 dark:border-gray-700 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent`}
               value={localSearchTerm}
               onChange={(e) => setLocalSearchTerm(e.target.value)}
             />
-            
+
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 space-x-2">
-              
-              {searchTerm && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <label className="inline-flex items-center cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={searchHighlighting}
-                          onChange={(e) =>
-                            onSearchHighlightingChange(e.target.checked)
-                          }
-                          className="sr-only peer"
-                        />
-                        <div
-                          className={`relative w-7 h-4 rounded-full peer peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white ${
-                            searchHighlighting
-                              ? "bg-indigo-600 dark:bg-indigo-600"
-                              : "bg-gray-200 dark:bg-gray-600"
-                          }`}
-                        ></div>
-                      </label>
-                    </TooltipTrigger>
-                    <TooltipContent>Highlight search matches</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-              
               {localSearchTerm && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => {
-                          setLocalSearchTerm("");
-                          onSearchChange("");
-                        }}
-                        className="text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>Clear search</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => {
+                        setLocalSearchTerm("");
+                        onSearchChange("");
+                      }}
+                      className="text-gray-400 hover:text-gray-500 dark:text-gray-500 dark:hover:text-gray-400"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Clear search</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>
 
-          <div className="flex space-x-2">
-            {filterButtons.map((filter) => (
-              <TooltipProvider key={filter.key}>
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="hover:bg-gray-100 dark:hover:bg-gray-800"
+                    aria-label="Search options"
+                  >
+                    <SlidersHorizontal className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>Search options</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-56" onOpenAutoFocus={e => e.preventDefault()}>
+              <TooltipProvider delayDuration={500} skipDelayDuration={0}>
+                <div className="px-2 pt-1 pb-2 text-xs text-slate-500">Scope</div>
+                <DropdownMenuRadioGroup value={searchScope} onValueChange={onSearchScopeChange}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuRadioItem value="server">Server</DropdownMenuRadioItem>
+                    </TooltipTrigger>
+                    <TooltipContent>Search only the selected server</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuRadioItem value="all">Global</DropdownMenuRadioItem>
+                    </TooltipTrigger>
+                    <TooltipContent>Search across all servers</TooltipContent>
+                  </Tooltip>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <button
-                      onClick={filter.onClick}
-                      className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                        filter.isActive
-                          ? filter.activeClass
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-                      }`}
+                    <DropdownMenuCheckboxItem
+                      checked={!!searchHighlighting}
+                      onCheckedChange={(v) => onSearchHighlightingChange(!!v)}
                     >
-                      {filter.label}
-                    </button>
+                      Highlight
+                    </DropdownMenuCheckboxItem>
                   </TooltipTrigger>
-                  <TooltipContent>{filter.title}</TooltipContent>
+                  <TooltipContent>Highlight matching text in results</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <div className="flex space-x-2">
+            {filterButtons.map((filter) => (
+              <Tooltip key={filter.key}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={filter.onClick}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      filter.isActive
+                        ? filter.activeClass
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                    }`}
+                  >
+                    {filter.label}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{filter.title}</TooltipContent>
+              </Tooltip>
             ))}
           </div>
 
           <div className="h-6 border-l border-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
-          
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <label className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
-              className="sr-only peer"
-            />
-            <div
-              className={`relative w-9 h-5 rounded-full peer peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white ${
-                autoRefresh
-                  ? "bg-indigo-600 dark:bg-indigo-600"
-                  : "bg-gray-200 dark:bg-gray-600"
-              }`}
-            ></div>
-            <span>Auto-refresh</span>
-                </label>
-              </TooltipTrigger>
-              <TooltipContent>Toggle auto-refresh</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <label className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div
+                  className={`relative w-9 h-5 rounded-full peer peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white ${
+                    autoRefresh
+                      ? "bg-indigo-600 dark:bg-indigo-600"
+                      : "bg-gray-200 dark:bg-gray-600"
+                  }`}
+                ></div>
+                <span>Auto-refresh</span>
+              </label>
+            </TooltipTrigger>
+            <TooltipContent>Toggle auto-refresh</TooltipContent>
+          </Tooltip>
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onRefresh}
-                  disabled={loading}
-                  className="hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  {refreshIcon}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{loading ? "Refreshing..." : "Refresh all data"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onRefresh}
+                disabled={loading}
+                className="hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                {refreshIcon}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{loading ? "Refreshing..." : "Refresh all data"}</TooltipContent>
+          </Tooltip>
 
           <div className="h-6 border-l border-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onThemeToggle}
-                  className="hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  {isDarkMode ? (
-                    <Sun className="h-5 w-5" />
-                  ) : (
-                    <Moon className="h-5 w-5" />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{isDarkMode ? "Switch to light mode" : "Switch to dark mode"}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onThemeToggle}
+                className="hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                {isDarkMode ? (
+                  <Sun className="h-5 w-5" />
+                ) : (
+                  <Moon className="h-5 w-5" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{isDarkMode ? "Switch to light mode" : "Switch to dark mode"}</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

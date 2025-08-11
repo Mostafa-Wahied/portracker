@@ -98,7 +98,9 @@ function ServerSectionComponent({
   useEffect(() => {
     try {
       localStorage.setItem(`showInternalPorts:${id}`, JSON.stringify(showInternal));
-    } catch {}
+    } catch {
+      /* Failed to save to localStorage - not critical */
+    }
   }, [id, showInternal]);
 
   const visiblePorts = useMemo(

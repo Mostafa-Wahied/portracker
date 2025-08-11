@@ -221,8 +221,8 @@ function detectHostAddresses() {
           }
         }
       }
-    } catch (err) {
-      
+    } catch {
+      /* Ignore network discovery errors - will fall back to default addresses */
     }
     
     hostAddresses.push("host.docker.internal");

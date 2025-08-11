@@ -178,6 +178,7 @@ function isDockerDesktopEnvironment() {
     
     return false;
   } catch (err) {
+    logger.debug("Error checking Docker Desktop environment:", { error: err.message });
     return false;
   }
 }
@@ -773,8 +774,8 @@ app.get("/api/servers/:id/scan", async (req, res) => {
             let errorBody = "Peer responded with an error.";
             try {
               errorBody = await peerResponse.text();
-            } catch (e) {
-              
+            } catch {
+              /* Failed to read error response body - will log generic error */
             }
             logger.warn(
               `[GET /api/servers/${serverId}/scan] Peer server at ${server.url} responded with status ${peerResponse.status}. Body: ${errorBody}`
@@ -857,7 +858,7 @@ function validateServerInput(req, res, next) {
   ) {
     try {
       new URL(url.trim());
-    } catch (e) {
+    } catch {
       return res
         .status(400)
         .json({
@@ -1345,7 +1346,9 @@ app.get("/api/ping", async (req, res) => {
     }
     try {
       await dockerApi._ensureConnected?.();
-    } catch (_) {}
+    } catch {
+      /* Docker connection failed - will continue with unknown health status */
+    }
     const health = await (dockerApi.getContainerHealth ? dockerApi.getContainerHealth(container_id) : Promise.resolve({ status: 'unknown', health: 'unknown' }));
 
     const state = (health.status || '').toLowerCase();
@@ -1472,7 +1475,8 @@ app.get("/api/ping", async (req, res) => {
 app.get("/api/health", (req, res) => {
   logger.debug("Health check requested");
   try {
-  const _dbCheck = db.prepare("SELECT 1").get();
+    /* Test database connectivity */
+    db.prepare("SELECT 1").get();
     const memoryUsage = process.memoryUsage();
     const uptime = process.uptime();
 
