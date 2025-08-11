@@ -201,14 +201,18 @@ export function PortGridItem({
           )}
         </h4>
         {port.note && (
-          <p
-            className="text-xs text-slate-400 dark:text-slate-500 italic mt-1"
-            title={port.note}
-          >
-            {shouldHighlight
-              ? renderHighlightedText(highlightText(port.note, searchTerm))
-              : port.note}
-          </p>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p className="text-xs text-slate-400 dark:text-slate-500 italic mt-1">
+                  {shouldHighlight
+                    ? renderHighlightedText(highlightText(port.note, searchTerm))
+                    : port.note}
+                </p>
+              </TooltipTrigger>
+              <TooltipContent>{port.note}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
       </div>
   <InternalPortDetails open={showDetails} onOpenChange={setShowDetails} containerId={port.container_id} serverId={serverId} />
@@ -228,7 +232,6 @@ export function PortGridItem({
               <TooltipTrigger asChild>
                 <span
                   className="inline-block px-2 py-1 rounded-full font-medium bg-slate-100 text-slate-500 dark:bg-slate-800/30 dark:text-slate-400 text-xs flex-shrink-0 truncate"
-                  title={formatCreatedTooltip(port.created)}
                 >
                   {formatCreatedDate(port.created)}
                 </span>

@@ -188,14 +188,18 @@ function PortTableRowComponent({
             </span>
           )}
           {port.note && (
-            <span
-              className="text-xs text-slate-400 dark:text-slate-500 italic"
-              title={port.note}
-            >
-              {shouldHighlight
-                ? renderHighlightedText(highlightText(port.note, searchTerm))
-                : port.note}
-            </span>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-slate-400 dark:text-slate-500 italic">
+                    {shouldHighlight
+                      ? renderHighlightedText(highlightText(port.note, searchTerm))
+                      : port.note}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{port.note}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           )}
         </div>
       </td>

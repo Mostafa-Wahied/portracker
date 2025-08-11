@@ -217,19 +217,24 @@ function PortCardComponent({
           </div>
           {port.note && (
             <div className="text-xs text-slate-500 dark:text-slate-400 italic pt-1">
-              {searchMatches.note ? (
-                <div title={port.note}>
-                  {shouldHighlight
-                    ? renderHighlightedText(
-                        highlightText(port.note, searchTerm)
-                      )
-                    : port.note}
-                </div>
-              ) : (
-                <div className="truncate" title={port.note}>
-                  {port.note}
-                </div>
-              )}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {searchMatches.note ? (
+                      <div>
+                        {shouldHighlight
+                          ? renderHighlightedText(
+                              highlightText(port.note, searchTerm)
+                            )
+                          : port.note}
+                      </div>
+                    ) : (
+                      <div className="truncate">{port.note}</div>
+                    )}
+                  </TooltipTrigger>
+                  <TooltipContent>{port.note}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           )}
         </div>

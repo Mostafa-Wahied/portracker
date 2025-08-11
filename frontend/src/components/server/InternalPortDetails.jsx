@@ -14,6 +14,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export function InternalPortDetails({ open, onOpenChange, containerId, serverId }) {
   const [data, setData] = useState(null);
@@ -137,11 +143,15 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
                   <div className="text-slate-500 dark:text-slate-400">
                     Image
                   </div>
-                  <div
-                    className="font-mono text-xs bg-slate-50 dark:bg-slate-900/40 px-2 py-1 rounded border border-slate-200 dark:border-slate-800 truncate"
-                    title={data.image}
-                  >
-                    {data.image}
+                  <div className="font-mono text-xs bg-slate-50 dark:bg-slate-900/40 px-2 py-1 rounded border border-slate-200 dark:border-slate-800 truncate">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="truncate inline-block max-w-full align-top">{data.image}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>{data.image}</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
                 </div>
                 <div className="space-y-1 text-sm">
@@ -260,20 +270,26 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
                   <pre ref={cmdRef} className="flex-1 text-xs bg-slate-950/95 dark:bg-slate-950 text-slate-100 rounded-md p-3 overflow-x-auto border border-slate-800">
                     {execCmd}
                   </pre>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    aria-label={copied ? "Copied" : "Copy command"}
-                    onClick={handleCopy}
-                    title={copied ? "Copied" : "Copy"}
-                  >
-                    {copied ? (
-                      <Check className="w-4 h-4 text-green-600" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </Button>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label={copied ? "Copied" : "Copy command"}
+                          onClick={handleCopy}
+                        >
+                          {copied ? (
+                            <Check className="w-4 h-4 text-green-600" />
+                          ) : (
+                            <Copy className="w-4 h-4" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>{copied ? "Copied" : "Copy"}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </section>
             </div>

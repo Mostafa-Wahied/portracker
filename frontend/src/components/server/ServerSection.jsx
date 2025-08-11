@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   Rows,
   Info,
+  Lock,
 } from "lucide-react";
 import { PortCard } from "./PortCard";
 import { PortGridItem } from "./PortGridItem";
@@ -32,6 +33,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Renders a comprehensive server overview section, including system information, virtual machines, and port management with sorting, filtering, and multiple layout options.
@@ -74,14 +76,46 @@ function ServerSectionComponent({
     }
   });
 
+  const [showInternal, setShowInternal] = useState(() => {
+    try {
+      const saved = localStorage.getItem(`showInternalPorts:${id}`);
+      return saved ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`showInternalPorts:${id}`);
+      if (saved != null) setShowInternal(JSON.parse(saved));
+      else setShowInternal(false);
+    } catch {
+      setShowInternal(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`showInternalPorts:${id}`, JSON.stringify(showInternal));
+    } catch {}
+  }, [id, showInternal]);
+
   const visiblePorts = useMemo(
-    () => (data ? data.filter((p) => !p.ignored) : []),
-    [data]
+    () => (data ? data.filter((p) => !p.ignored && (showInternal || !p.internal)) : []),
+    [data, showInternal]
   );
   const hiddenPorts = useMemo(
     () => (data ? data.filter((p) => p.ignored) : []),
     [data]
   );
+
+  const counts = useMemo(() => {
+    const list = Array.isArray(data) ? data.filter((p) => !p.ignored) : [];
+    const internal = list.filter((p) => p.internal).length;
+    const published = list.length - internal;
+    return { internal, published, total: list.length };
+  }, [data]);
 
   useEffect(() => {
     const validKeys = ["default", "host_port", "owner", "created"];
@@ -215,28 +249,40 @@ function ServerSectionComponent({
         <div>
           <div className="flex items-center justify-end mb-4">
             <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-900 rounded-lg p-1">
-              <button
-                onClick={() => onInfoCardLayoutChange("grid")}
-                className={`p-1.5 sm:p-2 rounded-md transition-colors ${
-                  infoCardLayout === "grid"
-                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                }`}
-                title="Grid Layout"
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => onInfoCardLayoutChange("stacked")}
-                className={`p-1.5 sm:p-2 rounded-md transition-colors ${
-                  infoCardLayout === "stacked"
-                    ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                }`}
-                title="Stacked Layout"
-              >
-                <Rows className="h-4 w-4" />
-              </button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onInfoCardLayoutChange("grid")}
+                      className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                        infoCardLayout === "grid"
+                          ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                      }`}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Grid layout</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onInfoCardLayoutChange("stacked")}
+                      className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                        infoCardLayout === "stacked"
+                          ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                      }`}
+                    >
+                      <Rows className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Stacked layout</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
           </div>
           <Accordion
@@ -294,11 +340,40 @@ function ServerSectionComponent({
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100 flex items-center">
               <Network className="h-5 w-5 mr-2 text-slate-600 dark:text-slate-400" />
               Ports
-              <span className="ml-2 text-sm font-normal text-slate-500 dark:text-slate-400">
-                ({visiblePorts.length})
-              </span>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="ml-2 text-sm font-normal text-slate-500 dark:text-slate-400 cursor-default">
+                      ({visiblePorts.length})
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {`Published: ${counts.published}, Internal: ${counts.internal}${showInternal ? " (showing internal)" : " (hiding internal)"}`}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </h2>
             <div className="flex items-center justify-start sm:justify-end flex-wrap gap-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setShowInternal((v) => !v)}
+                      className={`inline-flex items-center px-2 sm:px-3 py-2 border rounded-lg text-sm font-medium transition-colors ${
+                        showInternal
+                          ? "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm"
+                          : "border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      <Lock className="h-4 w-4 mr-2" />
+                      {showInternal ? "Internal: On" : "Internal: Off"}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {`${showInternal ? "Hide" : "Show"} internal ports`}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button className="inline-flex items-center px-2 sm:px-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
@@ -434,39 +509,57 @@ function ServerSectionComponent({
                 </DropdownMenuContent>
               </DropdownMenu>
               <div className="flex items-center space-x-1 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
-                <button
-                  onClick={() => onPortLayoutChange("list")}
-                  className={`p-1.5 sm:p-2 rounded-md transition-colors ${
-                    portLayout === "list"
-                      ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                  }`}
-                  title="List view"
-                >
-                  <List className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onPortLayoutChange("grid")}
-                  className={`p-1.5 sm:p-2 rounded-md transition-colors ${
-                    portLayout === "grid"
-                      ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                  }`}
-                  title="Grid view"
-                >
-                  <Grid3x3 className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => onPortLayoutChange("table")}
-                  className={`p-1.5 sm:p-2 rounded-md transition-colors ${
-                    portLayout === "table"
-                      ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
-                      : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-                  }`}
-                  title="Table view"
-                >
-                  <Table className="h-4 w-4" />
-                </button>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => onPortLayoutChange("list")}
+                        className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                          portLayout === "list"
+                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                        }`}
+                      >
+                        <List className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>List view</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => onPortLayoutChange("grid")}
+                        className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                          portLayout === "grid"
+                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                        }`}
+                      >
+                        <Grid3x3 className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Grid view</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => onPortLayoutChange("table")}
+                        className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                          portLayout === "table"
+                            ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
+                            : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                        }`}
+                      >
+                        <Table className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>Table view</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
               {sortedPorts.length > 8 && portLayout !== "grid" && (
                 <button

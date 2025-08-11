@@ -1,4 +1,5 @@
 import { Eye, EyeOff, ChevronDown } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function HiddenPortsDrawer({ hiddenPorts, onUnhide, serverId }) {
   if (hiddenPorts.length === 0) return null;
@@ -21,13 +22,19 @@ export function HiddenPortsDrawer({ hiddenPorts, onUnhide, serverId }) {
                 <span className="font-mono">{p.host_port}</span> —{" "}
                 <span className="truncate">{p.owner}</span>
               </div>
-              <button
-                onClick={() => onUnhide(p)}
-                title="Unhide port"
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-              >
-                <Eye className="w-4 h-4" />
-              </button>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => onUnhide(p)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Unhide port</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </li>
           ))}
         </ul>
