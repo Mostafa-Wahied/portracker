@@ -6,26 +6,25 @@
  * and system monitoring across multiple deployment platforms.
  */
 
-const express = require("express");
-const cors = require("cors");
-const db = require("./db");
-const { createCollector, detectCollector } = require("./collectors");
-const { Logger } = require("./lib/logger");
-const DockerAPIClient = require("./lib/docker-api");
-const path = require("path");
-const net = require("net");
-const http = require("http");
+const express = require('express');
+/* const bodyParser = require('body-parser'); */
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
+const fetch = (...args) => (globalThis.fetch ? globalThis.fetch(...args) : import('node-fetch').then(m => m.default(...args)));
+const { Logger } = require('./lib/logger');
+const DockerAPIClient = require('./lib/docker-api');
+const { createCollector, detectCollector } = require('./collectors');
+const db = require('./db');
+/* const http = require("http"); */
 const https = require("https");
-const fs = require("fs");
 const os = require("os");
 
-// Initialize logger for this component
 const logger = new Logger("Server", { debug: process.env.DEBUG === 'true' });
 const dockerApi = new DockerAPIClient();
 
 const PING_TIMEOUT = 2000;
 
-// Rate limiting for ping debug logs to prevent spam
 const pingDebugStats = {
   count: 0,
   startTime: Date.now(),
@@ -37,7 +36,6 @@ function logPingDebug(message, force = false) {
   pingDebugStats.count++;
   const now = Date.now();
   
-  // Log first few pings, then summary every 30 seconds
   if (pingDebugStats.count <= 5 || force || (now - pingDebugStats.lastSummaryTime) > 30000) {
     logger.debug(message);
     
@@ -90,12 +88,11 @@ function detectServiceType(port, owner) {
     }
   }
   
-  // Enhanced port range detection for web services
   if (portNum === 80 || portNum === 443 || portNum === 8080 || portNum === 8443 || 
-      (portNum >= 3000 && portNum <= 3999) ||  // Common dev ports
-      (portNum >= 4000 && portNum <= 4999) ||  // Common app ports
-      (portNum >= 8000 && portNum <= 8999) ||  // Common web alt ports
-      (portNum >= 9000 && portNum <= 9999)) {  // Management/admin ports
+  (portNum >= 3000 && portNum <= 3999) ||
+  (portNum >= 4000 && portNum <= 4999) ||
+  (portNum >= 8000 && portNum <= 8999) ||
+  (portNum >= 9000 && portNum <= 9999)) {
     return { name: 'Web Service', type: 'web', description: 'Web service' };
   }
   
@@ -296,6 +293,51 @@ async function testProtocol(scheme, host_ip, port, path = "/", isDebugEnabled = 
           `testProtocol GET ${url} failed: ${getError.message}`
         );
       }
+      if (scheme === 'https') {
+        try {
+          const start = Date.now();
+          const permissiveStatus = await new Promise((resolve, reject) => {
+            const req = https.request(
+              {
+                hostname: host_ip,
+                port,
+                path,
+                method: 'GET',
+                rejectUnauthorized: false,
+                timeout: PING_TIMEOUT,
+              },
+              (res) => {
+                const code = res.statusCode || 200;
+                res.resume();
+                resolve({ statusCode: code });
+              }
+            );
+            req.on('error', reject);
+            req.on('timeout', () => {
+              req.destroy(new Error('timeout'));
+            });
+            req.end();
+          });
+          const duration = Date.now() - start;
+          if (isDebugEnabled) {
+            logPingDebug(`testProtocol HTTPS permissive GET ${url} -> ${permissiveStatus.statusCode} (${duration}ms)`);
+          }
+          if (permissiveStatus.statusCode && permissiveStatus.statusCode < 500) {
+            clearTimeout(timeout);
+            return {
+              reachable: true,
+              statusCode: permissiveStatus.statusCode,
+              protocol: scheme,
+              method: 'GET',
+              responseTime: duration,
+            };
+          }
+        } catch (tlsErr) {
+          if (isDebugEnabled) {
+            logPingDebug(`testProtocol HTTPS permissive attempt failed: ${tlsErr.message}`);
+          }
+        }
+      }
     }
     
     clearTimeout(timeout);
@@ -484,7 +526,6 @@ function determineServiceStatus(serviceInfo, httpsResponse, httpResponse) {
   };
 }
 
-// Verify database schema before starting the server
 try {
   const columns = db.prepare("PRAGMA table_info(servers)").all();
   const columnNames = columns.map((col) => col.name);
@@ -509,14 +550,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
-let debug = false;
 
 /**
  * Get all ports from local system using collector framework.
  */
 app.get("/api/ports", async (req, res) => {
   const debug = req.query.debug === "true";
-  // Enable debug for this request if specified
   if (debug) logger.setDebugEnabled(true);
   
   logger.debug(`GET /api/ports called with debug=${debug}`);
@@ -564,7 +603,6 @@ app.get("/api/ports", async (req, res) => {
       .status(500)
       .json({ error: "Failed to scan ports", details: error.message });
   } finally {
-
     if (debug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
@@ -574,7 +612,6 @@ app.get("/api/ports", async (req, res) => {
  */
 app.get("/api/all-ports", async (req, res) => {
   const debug = req.query.debug === "true";
-  // Enable debug for this request if specified
   if (debug) logger.setDebugEnabled(true);
   
   logger.debug(`GET /api/all-ports called with debug=${debug}`);
@@ -613,7 +650,6 @@ app.get("/api/all-ports", async (req, res) => {
       .status(500)
       .json({ error: "Failed to process all ports", details: error.message });
   } finally {
-
     if (debug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
@@ -651,7 +687,6 @@ app.get("/api/servers/:id/scan", async (req, res) => {
   const serverId = req.params.id;
   const currentDebug = req.query.debug === "true";
   
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
   
   logger.debug(`GET /api/servers/${serverId}/scan called with debug=${currentDebug}`);
@@ -739,7 +774,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
             try {
               errorBody = await peerResponse.text();
             } catch (e) {
-              /* ignore */
+              
             }
             logger.warn(
               `[GET /api/servers/${serverId}/scan] Peer server at ${server.url} responded with status ${peerResponse.status}. Body: ${errorBody}`
@@ -837,7 +872,11 @@ function validateServerInput(req, res, next) {
     (!url || url.trim().length === 0) &&
     !req.body.unreachable
   ) {
-    // A reachable peer must have a URL. This is validated in the POST /api/servers endpoint
+    return res.status(400).json({
+      error: "Validation failed",
+      details: "Peer servers must include a valid URL unless marked unreachable",
+      field: "url",
+    });
   }
 
   req.body.type = type || "peer";
@@ -848,7 +887,7 @@ function validateServerInput(req, res, next) {
 }
 
 function validateNoteInput(req, res, next) {
-  const { server_id, host_ip, host_port, note } = req.body;
+  const { server_id, host_ip, host_port } = req.body;
   if (!server_id || typeof server_id !== "string") {
     return res
       .status(400)
@@ -1020,7 +1059,6 @@ app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
   const serverId = req.params.id;
   const currentDebug = req.query.debug === "true";
   
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
 
   logger.debug(`[DELETE /api/servers/${serverId}] Request received.`);
@@ -1079,7 +1117,6 @@ app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
         rawError: err.message,
       });
   } finally {
-
     if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
@@ -1089,7 +1126,6 @@ app.post("/api/notes", validateNoteInput, (req, res) => {
   const currentDebug = req.query.debug === "true";
   const noteTrimmed = note ? note.trim() : "";
 
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
 
   logger.debug(`POST /api/notes for ${server_id} ${host_ip}:${host_port}. Note: "${noteTrimmed}"`);
@@ -1129,7 +1165,6 @@ app.post("/api/notes", validateNoteInput, (req, res) => {
         details: "Unable to save note",
       });
   } finally {
-
     if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
@@ -1138,7 +1173,6 @@ app.get("/api/notes", (req, res) => {
   const { server_id } = req.query;
   const currentDebug = req.query.debug === "true";
 
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
 
   logger.debug(`GET /api/notes for server_id: ${server_id}`);
@@ -1164,7 +1198,6 @@ app.get("/api/notes", (req, res) => {
         details: "Unable to retrieve notes",
       });
   } finally {
-
     if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
@@ -1173,7 +1206,6 @@ app.post("/api/ignores", (req, res) => {
   const { server_id, host_ip, host_port, ignored } = req.body;
   const currentDebug = req.query.debug === "true";
 
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
 
   logger.debug(`POST /api/ignores for ${server_id} ${host_ip}:${host_port}. Ignored: ${ignored}`);
@@ -1228,7 +1260,6 @@ app.post("/api/ignores", (req, res) => {
         details: "Unable to update ignore status",
       });
   } finally {
-
     if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });
@@ -1237,7 +1268,6 @@ app.get("/api/ignores", (req, res) => {
   const { server_id } = req.query;
   const currentDebug = req.query.debug === "true";
 
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
 
   logger.debug(`GET /api/ignores for server_id: ${server_id}`);
@@ -1270,9 +1300,9 @@ app.get("/api/ignores", (req, res) => {
 
 app.get("/api/ping", async (req, res) => {
   const { host_ip, host_port, target_server_url, owner, internal, container_id } = req.query;
+  const serverId = req.query.server_id;
   const currentDebug = req.query.debug === "true";
   
-  // Enable debug for this request if specified
   if (currentDebug) logger.setDebugEnabled(true);
   
   if (!host_ip || !host_port) {
@@ -1288,6 +1318,31 @@ app.get("/api/ping", async (req, res) => {
   const serviceInfo = detectServiceType(host_port, owner);
 
   if (internal === 'true' && container_id) {
+    if (serverId && serverId !== 'local') {
+      try {
+        const row = db.prepare('SELECT url FROM servers WHERE id = ?').get(serverId);
+        if (!row || !row.url) {
+          return res.status(400).json({ error: 'server url not found for remote ping' });
+        }
+        const base = row.url.replace(/\/$/, '');
+        const params = new URLSearchParams();
+        params.set('internal', 'true');
+        params.set('container_id', container_id);
+        if (host_ip) params.set('host_ip', host_ip);
+        if (host_port) params.set('host_port', host_port);
+        if (owner) params.set('owner', owner);
+        if (currentDebug) params.set('debug', 'true');
+        const url = `${base}/api/ping?${params.toString()}`;
+        const resp = await fetch(url, { headers: { 'accept': 'application/json' } });
+        const text = await resp.text();
+        let body; try { body = JSON.parse(text); } catch { body = text; }
+        return res.status(resp.status).send(body);
+      } catch (e) {
+        logger.error(`[GET /api/ping] Remote proxy to ${serverId} failed:`, e.message);
+        logger.debug('Stack trace:', e.stack || '');
+        return res.status(502).json({ error: 'failed to proxy remote ping' });
+      }
+    }
     try {
       await dockerApi._ensureConnected?.();
     } catch (_) {}
@@ -1385,7 +1440,6 @@ app.get("/api/ping", async (req, res) => {
     logPingDebug(`Using provided host_ip '${host_ip}' for port ${host_port}`);
   }
   
-  // Only log service testing for first few pings or important services
   const isImportantService = serviceInfo.type !== 'service' || portNum <= 1024;
   if (currentDebug && (pingDebugStats.count <= 3 || isImportantService)) {
     logger.debug(`Testing ${serviceInfo.name} (${serviceInfo.type}) on ${pingable_host_ip}:${portNum}`);
@@ -1396,7 +1450,6 @@ app.get("/api/ping", async (req, res) => {
   
   const result = determineServiceStatus(serviceInfo, httpsResponse, httpResponse);
   
-  // Only log results for first few pings or failures
   if (currentDebug && (pingDebugStats.count <= 3 || result.status === 'unreachable')) {
     logger.debug(`Service status for ${pingable_host_ip}:${portNum} -> ${result.status} (${result.color})`);
   }
@@ -1419,7 +1472,7 @@ app.get("/api/ping", async (req, res) => {
 app.get("/api/health", (req, res) => {
   logger.debug("Health check requested");
   try {
-    const dbCheck = db.prepare("SELECT 1").get();
+  const _dbCheck = db.prepare("SELECT 1").get();
     const memoryUsage = process.memoryUsage();
     const uptime = process.uptime();
 
@@ -1442,11 +1495,96 @@ app.get("/api/health", (req, res) => {
   }
 });
 
+app.get("/api/containers/:id/details", async (req, res) => {
+  const containerId = req.params.id;
+  const currentDebug = req.query.debug === 'true';
+  const serverId = req.query.server_id;
+
+  if (!containerId) {
+    return res.status(400).json({ error: 'container id is required' });
+  }
+
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  try {
+    if (serverId && serverId !== 'local') {
+      try {
+        const row = db.prepare('SELECT url FROM servers WHERE id = ?').get(serverId);
+        if (!row || !row.url) {
+          return res.status(400).json({ error: 'server url not found for remote details' });
+        }
+        const base = row.url.replace(/\/$/, '');
+        const url = `${base}/api/containers/${encodeURIComponent(containerId)}/details`;
+  const remoteResp = await fetch(url, { method: 'GET', headers: { 'accept': 'application/json' } });
+        const text = await remoteResp.text();
+        let body;
+        try { body = JSON.parse(text); } catch { body = text; }
+        return res.status(remoteResp.status).send(body);
+      } catch (proxyErr) {
+        logger.error(`Proxy to peer ${serverId} for container ${containerId} failed:`, proxyErr.message);
+        logger.debug('Stack trace:', proxyErr.stack || '');
+        return res.status(502).json({ error: 'failed to proxy remote container details' });
+      }
+    }
+
+    await dockerApi._ensureConnected?.();
+    const insp = await dockerApi.inspectContainer(containerId);
+    const health = await dockerApi.getContainerHealth(containerId);
+
+    const portsObj = insp.NetworkSettings?.Ports || {};
+    const portMappings = [];
+    for (const [containerPort, hostBindings] of Object.entries(portsObj)) {
+      if (hostBindings && Array.isArray(hostBindings) && hostBindings.length) {
+        for (const hb of hostBindings) {
+          portMappings.push({
+            host_ip: hb.HostIp || '0.0.0.0',
+            host_port: parseInt(hb.HostPort, 10),
+            container_port: parseInt(containerPort.split('/')[0], 10),
+            protocol: containerPort.split('/')[1] || 'tcp'
+          });
+        }
+      } else {
+        const [p, proto] = containerPort.split('/');
+        portMappings.push({
+          host_ip: '0.0.0.0',
+          host_port: parseInt(p, 10),
+          container_port: parseInt(p, 10),
+          protocol: proto || 'tcp',
+          internal: true
+        });
+      }
+    }
+
+    const response = {
+      id: insp.Id?.substring(0, 12) || containerId,
+      name: (insp.Name || '').replace(/^\//, ''),
+      image: insp.Config?.Image,
+      command: Array.isArray(insp.Config?.Cmd) ? insp.Config.Cmd.join(' ') : insp.Config?.Cmd,
+      created: Math.floor(new Date(insp.Created).getTime() / 1000) || null,
+      state: insp.State?.Status,
+      health: health.health || 'unknown',
+      restartCount: insp.RestartCount || 0,
+      networkMode: insp.HostConfig?.NetworkMode || '',
+      ports: portMappings,
+      labels: insp.Config?.Labels || {},
+      mounts: (insp.Mounts || []).map(m => ({ type: m.Type, source: m.Source, destination: m.Destination }))
+    };
+
+    return res.json(response);
+  } catch (err) {
+    logger.error(`GET /api/containers/${containerId}/details failed:`, err.message);
+    logger.debug('Stack trace:', err.stack || '');
+    return res.status(500).json({ error: 'failed to get container details' });
+  } finally {
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+  }
+});
+
 const staticPath = path.join(__dirname, "public");
 logger.info(`Attempting to serve static files from: ${staticPath}`);
 app.use(express.static(staticPath, { fallthrough: true, index: false }));
 
-app.get("*", (req, res, next) => {
+app.get("*", (req, res, _next) => {
   const indexPath = path.join(__dirname, "public", "index.html");
   logger.debug(`Serving frontend for path: ${req.path}`);
   res.sendFile(indexPath, (err) => {

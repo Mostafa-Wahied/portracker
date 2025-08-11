@@ -48,10 +48,8 @@ export function formatCreatedDate(dateString) {
   
   let date;
   if (typeof dateString === 'number') {
-    // Unix timestamp (seconds)
     date = new Date(dateString * 1000);
   } else if (typeof dateString === 'string') {
-    // ISO string, possibly with UTC suffix
     date = new Date(dateString.replace(" +0000 UTC", "Z"));
   } else {
     return "N/A";
@@ -81,10 +79,8 @@ export function formatCreatedTooltip(dateString) {
   
   let date;
   if (typeof dateString === 'number') {
-    // Unix timestamp (seconds)
     date = new Date(dateString * 1000);
   } else if (typeof dateString === 'string') {
-    // ISO string, possibly with UTC suffix
     date = new Date(dateString.replace(" +0000 UTC", "Z"));
   } else {
     return "Created: N/A";

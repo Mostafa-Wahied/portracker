@@ -5,10 +5,45 @@ const js = require('@eslint/js');
 const globals = require('globals');
 let reactHooks;
 try { reactHooks = require('eslint-plugin-react-hooks'); } catch { reactHooks = null; }
+let reactPlugin;
+try { reactPlugin = require('eslint-plugin-react'); } catch { reactPlugin = null; }
 
-// Inline custom plugin: `logs`
+// Inline custom plugins
+// 1) `logs` – logging hygiene
+// 2) `codebase` – repo-wide style rules (comments, etc.)
 const logsPlugin = {
   rules: {
+    // Disallow any line comments beginning with // (except whitelisted directives)
+    'no-line-comments': {
+      meta: { type: 'problem', docs: { description: 'Disallow // line comments; use block comments or remove' } },
+      create(context) {
+        const allowList = [
+          /^eslint[- ]/i, // eslint directives
+          /^ts[- ]/i, // ts-ignore/expect-error (if present in mixed envs)
+          /^istanbul ignore/i,
+          /^region\b/i, // region markers if used
+          /^endregion\b/i,
+        ];
+        return {
+          Program() {
+            const sourceCode = context.sourceCode || context.getSourceCode();
+            const comments = sourceCode.getAllComments();
+            for (const c of comments) {
+              if (c.type === 'Line') {
+                const text = String(c.value || '').trim();
+                const allowed = allowList.some((re) => re.test(text));
+                if (!allowed) {
+                  context.report({
+                    loc: c.loc,
+                    message: 'Line comments (//) are disallowed. Convert to a block comment (/* */) if this is essential documentation, or remove the comment.',
+                  });
+                }
+              }
+            }
+          },
+        };
+      },
+    },
     // Disallow emojis in any logger.* arguments
     'no-emoji-in-logs': {
       meta: { type: 'problem', docs: { description: 'Disallow emojis in log messages' } },
@@ -256,6 +291,32 @@ const logsPlugin = {
   },
 };
 
+const codebasePlugin = {
+  rules: {
+    // Disallow all line comments (// ...) except ESLint directives
+    // Rationale: keep comments to essential block docs only; use JSDoc when necessary.
+    'no-line-comments-except-directives': {
+      meta: { type: 'problem', docs: { description: 'Disallow // line comments except ESLint directives' } },
+      create(context) {
+        return {
+          Program() {
+            const sourceCode = context.sourceCode || context.getSourceCode();
+            const comments = sourceCode.getAllComments();
+            for (const c of comments) {
+              if (c.type !== 'Line') continue;
+              const text = String(c.value || '').trim();
+              const isEslintDirective = /^eslint(?:-|\b)/i.test(text); // e.g., eslint-disable-next-line
+              if (!isEslintDirective) {
+                context.report({ loc: c.loc, message: 'Line comments (//) are not allowed. Use minimal block comments only when essential.' });
+              }
+            }
+          },
+        };
+      },
+    },
+  },
+};
+
 module.exports = [
   // Global ignores
   { ignores: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/*.min.js', '**/*.bundle.js', 'portracker.tar', 'scripts/**'] },
@@ -268,19 +329,26 @@ module.exports = [
       sourceType: 'commonjs',
       globals: globals.node,
     },
-    plugins: { logs: logsPlugin },
+  plugins: { logs: logsPlugin, codebase: codebasePlugin },
     rules: {
       ...js.configs.recommended.rules,
   'no-console': 'error',
   // Eliminate warnings across the codebase (temporarily disable noisy rules)
-  'no-unused-vars': 'off',
-  'no-useless-escape': 'off',
-  'no-empty': 'off',
-  'logs/no-emoji-in-logs': 'error',
-  'logs/no-debug-gated-info-warn': 'error',
+  'no-unused-vars': ['warn', { args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^(React|_)', caughtErrors: 'none' }],
+  'no-useless-escape': 'warn',
+  'no-empty': ['warn', { allowEmptyCatch: true }],
+  // Disallow non-production comment markers
+  'no-warning-comments': ['warn', {
+    terms: ['todo','fixme','xxx','hack','wip','temp','debug-only','dev only','remove before prod','remove before release','non-prod','// ','non production','temporary'],
+    location: 'anywhere'
+  }],
+  'logs/no-emoji-in-logs': 'warn',
+  'logs/no-line-comments': 'warn',
+  'logs/no-debug-gated-info-warn': 'warn',
   'logs/logger-requires-metadata': 'off',
   'logs/error-object-in-logger-error': 'off',
   'logs/no-raw-req-res-body-logging': 'off',
+  'codebase/no-line-comments-except-directives': 'warn',
     },
   },
 
@@ -293,19 +361,30 @@ module.exports = [
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
-    plugins: { logs: logsPlugin, ...(reactHooks ? { 'react-hooks': reactHooks } : {}) },
+  plugins: { logs: logsPlugin, codebase: codebasePlugin, ...(reactHooks ? { 'react-hooks': reactHooks } : {}), ...(reactPlugin ? { react: reactPlugin } : {}) },
+    settings: {
+      ...(reactPlugin ? { react: { version: 'detect' } } : {}),
+    },
     rules: {
       ...js.configs.recommended.rules,
   'no-console': 'error',
-  'no-unused-vars': 'off',
-  'no-useless-escape': 'off',
-  'no-empty': 'off',
+  'no-unused-vars': ['warn', { args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^(React|_)', caughtErrors: 'none' }],
+  'no-useless-escape': 'warn',
+  'no-empty': ['warn', { allowEmptyCatch: true }],
+  // Disallow non-production comment markers
+  'no-warning-comments': ['warn', {
+    terms: ['todo','fixme','xxx','hack','wip','temp','debug-only','dev only','remove before prod','remove before release','non-prod','// ','non production','temporary'],
+    location: 'anywhere'
+  }],
       ...(reactHooks ? { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' } : {}),
-  'logs/no-emoji-in-logs': 'error',
-  'logs/no-debug-gated-info-warn': 'error',
+  ...(reactPlugin ? { 'react/jsx-uses-vars': 'error', 'react/jsx-uses-react': 'error' } : {}),
+  'logs/no-emoji-in-logs': 'warn',
+  'logs/no-line-comments': 'warn',
+  'logs/no-debug-gated-info-warn': 'warn',
   'logs/logger-requires-metadata': 'off',
   'logs/error-object-in-logger-error': 'off',
   'logs/no-raw-req-res-body-logging': 'off',
+  'codebase/no-line-comments-except-directives': 'warn',
     },
   },
 
@@ -316,6 +395,7 @@ module.exports = [
     rules: {
       'no-console': 'off',
       'logs/no-emoji-in-logs': 'off',
+  'logs/no-line-comments': 'off',
       'logs/no-debug-gated-info-warn': 'off',
       'logs/logger-requires-metadata': 'off',
       'logs/error-object-in-logger-error': 'off',

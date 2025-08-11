@@ -136,9 +136,9 @@ export function AppHeader({
               value={localSearchTerm}
               onChange={(e) => setLocalSearchTerm(e.target.value)}
             />
-            {/* Highlight checkbox and clear button container */}
+            
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 space-x-2">
-              {/* Modern toggle-style checkbox - only show when there's a search term */}
+              
               {searchTerm && (
                 <label
                   className="inline-flex items-center cursor-pointer"
@@ -161,7 +161,7 @@ export function AppHeader({
                   ></div>
                 </label>
               )}
-              {/* Clear button */}
+              
               {localSearchTerm && (
                 <button
                   onClick={() => {
@@ -196,7 +196,7 @@ export function AppHeader({
 
           <div className="h-6 border-l border-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
-          {/* Modern toggle for auto-refresh */}
+          
           <label
             className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer"
             title="Toggle auto-refresh"

@@ -17,26 +17,39 @@ class DockerAPIClient {
     const tlsVerify = options.tlsVerify ?? (process.env.DOCKER_TLS_VERIFY === '1');
     const certPath = options.certPath ?? process.env.DOCKER_CERT_PATH;
 
-    // 1) Unix domain socket (default and unix://)
-    if (!dockerHost || dockerHost.startsWith('unix://')) {
+  
+    if (dockerHost?.startsWith('unix://')) {
       this.deploymentPattern = 'socket';
-      const socketPath = dockerHost?.replace(/^unix:\/\//, '') || defaultSocket;
+      const socketPath = dockerHost.replace(/^unix:\/\//, '');
       return new Docker({ socketPath });
     }
 
-    // 2) Windows named pipe
-    if (dockerHost.startsWith('npipe://')) {
+  
+    if (dockerHost?.startsWith('npipe://')) {
       this.deploymentPattern = 'npipe';
-      return new Docker({ socketPath: dockerHost });
+      const npipePath = dockerHost.replace(/^npipe:\/\//, '');
+      return new Docker({ socketPath: npipePath });
     }
 
-    // 3) TCP/HTTP(S)
+  
+    if (!dockerHost) {
+      if (process.platform === 'win32') {
+  
+        this.deploymentPattern = 'npipe';
+        return new Docker({ socketPath: '//./pipe/docker_engine' });
+      }
+  
+      this.deploymentPattern = 'socket';
+      return new Docker({ socketPath: defaultSocket });
+    }
+
+  
     const urlStr = dockerHost.replace(/^tcp:\/\//, 'http://');
     const u = new URL(urlStr);
     const dockerOpts = {
       host: u.hostname,
       port: u.port ? Number(u.port) : (tlsVerify ? 2376 : 2375),
-      protocol: (u.protocol || 'http:').slice(0, -1) // 'http' | 'https'
+  protocol: (u.protocol || 'http:').slice(0, -1)
     };
 
     if (tlsVerify && certPath) {
@@ -98,7 +111,7 @@ class DockerAPIClient {
         Status: container.Status,
         State: container.State,
         Ports: this._formatPorts(container.Ports),
-        // Include other container properties but don't override our processed fields
+  
         Labels: container.Labels,
         NetworkSettings: container.NetworkSettings,
         Mounts: container.Mounts,
@@ -182,7 +195,7 @@ class DockerAPIClient {
     return await this.connect();
   }
 
-  // Additional utility methods for common operations
+  
   async getSystemVersion() {
     await this._ensureConnected();
     

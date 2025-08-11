@@ -3,15 +3,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 export function ServerSectionSkeleton() {
   return (
     <div className="space-y-8">
-      {/* Server Header Skeleton */}
+      
       <div className="flex items-center gap-3">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-6 w-20 rounded-full" />
       </div>
 
-      {/* System Info and VMs Row Skeleton */}
+      
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* System Info Card Skeleton */}
+        
         <div className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50 p-6">
           <div className="flex items-center mb-4">
             <Skeleton className="h-5 w-5 mr-2" />
@@ -43,7 +43,7 @@ export function ServerSectionSkeleton() {
           </div>
         </div>
 
-        {/* VMs Card Skeleton */}
+        
         <div className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50">
           <div className="p-6 border-b border-slate-200 dark:border-slate-700/50">
             <div className="flex items-center">
@@ -82,7 +82,7 @@ export function ServerSectionSkeleton() {
         </div>
       </div>
 
-      {/* Ports Section Skeleton */}
+      
       <div className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50 shadow-sm">
         <div className="p-6 border-b border-slate-200 dark:border-slate-700/50">
           <div className="flex items-center justify-between">
@@ -99,7 +99,7 @@ export function ServerSectionSkeleton() {
           </div>
         </div>
 
-        {/* Port List Skeleton */}
+        
         <div>
           <ul className="divide-y divide-slate-100 dark:divide-slate-800">
             {Array.from({ length: 5 }).map((_, i) => (

@@ -110,7 +110,7 @@ class DockerCollector extends BaseCollector {
       return containers.map((container) => ({
         type: "application",
         id: container.ID,
-        name: container.Names, // This is already a string from listContainers()
+          name: container.Names,
         status: container.State,
         version: "N/A",
         image: container.Image,
@@ -280,16 +280,13 @@ class DockerCollector extends BaseCollector {
         const containerName = container.Names;
         const containerId = container.ID;
         
-        // Skip containers without port mappings
         if (!container.Ports || container.Ports.length === 0) {
           continue;
         }
 
-        // Use the raw port data from dockerode instead of CLI parsing
         const rawPorts = await this.dockerApi.docker.getContainer(container.ID).inspect();
         const portBindings = rawPorts.NetworkSettings.Ports || {};
 
-  // Process each port mapping
   for (const [containerPort, hostBindings] of Object.entries(portBindings)) {
           if (!hostBindings) continue;
           
@@ -428,15 +425,15 @@ class DockerCollector extends BaseCollector {
    */
   async _checkIfPortBelongsToDocker(port) {
     try {
-      // Use Docker API to find containers with published ports
       const containers = await this.dockerApi.listContainers();
       
       for (const container of containers) {
-        // Check if this container publishes the port we're looking for
         const inspection = await this.dockerApi.inspectContainer(container.ID);
         const portBindings = inspection.NetworkSettings?.Ports || {};
-        
-  for (const [, hostBindings] of Object.entries(portBindings)) {
+
+        for (const key in portBindings) {
+          if (!Object.prototype.hasOwnProperty.call(portBindings, key)) continue;
+          const hostBindings = portBindings[key];
           if (!hostBindings) continue;
           
           for (const binding of hostBindings) {
@@ -451,7 +448,6 @@ class DockerCollector extends BaseCollector {
         }
       }
 
-      // If not found by published ports, try to find by process name
       if (port.owner && port.owner !== "unknown") {
         const containerInfo = await this._getContainerByProcessName(
           port.owner,

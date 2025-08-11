@@ -19,7 +19,6 @@ class BaseCollector {
     this.platform = "generic";
     this.platformName = "Generic Platform";
     
-    // Initialize logger for this collector
     this.logger = new Logger(this.platformName, { debug: this.debug });
   }
 
@@ -68,7 +67,6 @@ class BaseCollector {
       return await this.collect();
     }
 
-    // Otherwise use the standard approach
     try {
       const [systemInfo, applications, ports, vms] = await Promise.allSettled([
         this.getSystemInfo(),

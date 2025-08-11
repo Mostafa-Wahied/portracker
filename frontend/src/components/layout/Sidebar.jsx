@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   Trash2,
-  Edit,
   Plus,
   Check,
   X,
@@ -10,12 +9,9 @@ import {
   Clock,
   Zap,
   BarChart3,
-  Database,
   Settings,
   Loader2,
   AlertCircle,
-  Wifi,
-  WifiOff,
   Pencil,
   Container,
   MoreVertical,
@@ -79,7 +75,6 @@ const ServerCard = React.memo(function ServerCard({
   const vmCount = vms.length;
 
   const getHostDisplay = () => {
-    // For local server, use the current window's host (where the app is running)
     if (!server.url) {
       return window.location.host || "localhost";
     }
@@ -128,7 +123,6 @@ const ServerCard = React.memo(function ServerCard({
           </p>
         </div>
 
-        {/* Desktop/Tablet Actions (on hover/focus) */}
         <div className="hidden md:flex items-center space-x-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
           <button
             onClick={(e) => {
@@ -154,7 +148,6 @@ const ServerCard = React.memo(function ServerCard({
           )}
         </div>
 
-        {/* Mobile Actions (Dropdown Menu) */}
         <div className="md:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -174,6 +167,7 @@ const ServerCard = React.memo(function ServerCard({
                 <Pencil className="mr-2 h-4 w-4" />
                 <span>Edit</span>
               </DropdownMenuItem>
+        
               {server.id !== "local" && (
                 <DropdownMenuItem
                   onClick={() => onDelete(server)}
@@ -188,7 +182,7 @@ const ServerCard = React.memo(function ServerCard({
         </div>
       </div>
 
-      {/* Rest of the existing stats */}
+        
       <div className="mt-3 flex items-center justify-between text-sm text-slate-500 dark:text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300 transition-colors">
         <div className="flex items-center space-x-3">
           <HardDrive className="h-3 w-3 mr-1" />

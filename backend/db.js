@@ -1,32 +1,26 @@
-// backend/db.js
 const fs = require("fs");
 const path = require("path");
 const Database = require("better-sqlite3");
 const { Logger } = require("./lib/logger");
 
-// Initialize logger for database operations
 const logger = new Logger("Database", { debug: process.env.DEBUG === 'true' });
 
-// Where to store DB: use env if present, else fallback to ./data/ports-tracker.db
 const defaultDataDir = path.resolve(process.cwd(), "data");
 const defaultDbPath = path.join(defaultDataDir, "ports-tracker.db");
 const dbPath = process.env.DATABASE_PATH || defaultDbPath;
 
-// If using the default location, ensure the dir exists
 if (!process.env.DATABASE_PATH) {
   fs.mkdirSync(defaultDataDir, { recursive: true });
 }
 logger.info("Using database at", dbPath);
 const db = new Database(dbPath);
 
-// Check if servers table exists
 const tableExists = db
   .prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='servers'"
   )
   .get();
 
-// If not existing, create with all required columns
 if (!tableExists) {
   logger.info("Creating new database tables with updated schema");
   db.exec(`
@@ -53,9 +47,8 @@ if (!tableExists) {
       FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
 `);
-  // createNotesTable.run();
+  
 
-  // Add updated_at to notes table if it doesn't exist
   try {
     const notesColumns = db.prepare("PRAGMA table_info(notes)").all();
     if (!notesColumns.some((col) => col.name === "updated_at")) {
@@ -63,7 +56,6 @@ if (!tableExists) {
       db.prepare("ALTER TABLE notes ADD COLUMN updated_at DATETIME").run();
     }
   } catch (err) {
-    // This can happen if the table doesn't exist yet on first run, which is fine.
     if (!err.message.includes("no such table: notes")) {
       logger.info("Error during notes table schema check:", err.message);
     }
@@ -80,9 +72,7 @@ if (!tableExists) {
 `);
   createIgnoresTable.run();
 } else {
-  // Migration logic for existing tables
   try {
-    // Add updated_at to notes table if it doesn't exist
     const notesColumns = db.prepare("PRAGMA table_info(notes)").all();
     if (!notesColumns.some((col) => col.name === "updated_at")) {
       logger.info('Schema migration: Adding "updated_at" column to "notes" table.');
@@ -121,7 +111,7 @@ if (!tableExists) {
         );
       `);
   for (const server of existingServers) {
-        // Assumes 'id', 'label', 'url' are always present in old data
+        
         db.prepare(
           `
           INSERT INTO servers_new (id, label, url, parentId, platform, platform_config, platform_type, unreachable, type)
@@ -174,7 +164,7 @@ if (!tableExists) {
       migrationError.message
     );
     logger.debug("Stack trace:", migrationError.stack || "");
-    // If migration fails, server may not be able to run.
+  
   }
 }
 

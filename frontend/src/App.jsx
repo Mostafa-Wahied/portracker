@@ -21,7 +21,6 @@ import Logger from "./lib/logger";
 
 const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 
-// Initialize logger for App component
 const logger = new Logger('App');
 
 

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Lock } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
   formatCreatedTooltip,
@@ -49,7 +50,9 @@ export function PortGridItem({
   onToggleIgnore,
 }) {
   const [protocol, setProtocol] = useState("http");
+  const [showDetails, setShowDetails] = useState(false);
   const searchMatches = getSearchMatches(port, searchTerm);
+  const canShowDetails = port?.source === "docker" && !!port?.container_id;
 
   const shouldHighlight = !!searchTerm;
 
@@ -76,7 +79,7 @@ export function PortGridItem({
       tabIndex="0"
       className="group relative border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 min-h-[120px] flex flex-col justify-between bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
     >
-      <div className="flex items-start justify-between mb-3">
+        <div className="flex items-start justify-between mb-3">
         <div className="flex items-center space-x-2 min-w-0 flex-1">
           <PortStatusIndicator
             serverId={serverId}
@@ -84,15 +87,28 @@ export function PortGridItem({
             port={port}
             onProtocolChange={setProtocol}
           />
-          <TooltipProvider>
-            <Tooltip>
+          <div className="inline-flex items-center">
+            <TooltipProvider>
+              <Tooltip>
               <TooltipTrigger asChild>
-                <a
-                  href={uiClickableUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group/link inline-flex items-center space-x-1"
-                >
+                  {port.internal ? (
+                  <span className="group/link inline-flex items-center space-x-1">
+                      <span className="inline-flex items-center px-2.5 py-1.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-200 text-base font-semibold">
+                      {shouldHighlight
+                        ? renderHighlightedText(
+                            highlightText(port.host_port.toString(), searchTerm)
+                          )
+                        : port.host_port}
+                        <Lock className="ml-1 h-[0.8em] w-[0.8em] align-middle shrink-0" aria-hidden="true" />
+                    </span>
+                  </span>
+                ) : (
+                  <a
+                    href={uiClickableUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                      className="group/link inline-flex items-center space-x-1"
+                  >
                   <span className="inline-flex items-center px-2.5 py-1.5 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-200 text-base font-semibold">
                     {shouldHighlight
                       ? renderHighlightedText(
@@ -101,27 +117,34 @@ export function PortGridItem({
                       : port.host_port}
                   </span>
                   <ExternalLink className="w-3 h-3 text-indigo-600 dark:text-indigo-400 opacity-0 group-hover/link:opacity-100 transition-opacity" />
-                </a>
-              </TooltipTrigger>
-              {!port.internal && port.target && (
-                <TooltipContent>
-                  {searchMatches.target ? (
-                    <span>
-                      Internal:{" "}
-                      {shouldHighlight
-                        ? renderHighlightedText(
-                            highlightText(port.target, searchTerm)
-                          )
-                        : port.target}
-                    </span>
-                  ) : (
-                    `Internal: ${port.target}`
-                  )}
-                </TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
+                  </a>
+                )}
+                </TooltipTrigger>
+                {port.internal ? (
+                  <TooltipContent>Internal only</TooltipContent>
+                ) : (
+                  !port.internal && port.target && (
+                  <TooltipContent>
+                    {searchMatches.target ? (
+                      <span>
+                        Internal:{" "}
+                        {shouldHighlight
+                          ? renderHighlightedText(
+                              highlightText(port.target, searchTerm)
+                            )
+                          : port.target}
+                      </span>
+                    ) : (
+                      `Internal: ${port.target}`
+                    )}
+                  </TooltipContent>
+                  )
+                )}
+              </Tooltip>
+            </TooltipProvider>
+          </div>
         </div>
+        
         <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ml-2">
           <PortActions
             port={port}
@@ -138,7 +161,7 @@ export function PortGridItem({
         </div>
       </div>
 
-      {/* Show internal port when search matches and it's different */}
+      
       {searchMatches.target && port.target !== port.host_port.toString() && (
         <div className="mb-2">
           <span className="text-xs text-slate-500 dark:text-slate-400 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded border border-yellow-200 dark:border-yellow-700/50">
@@ -152,9 +175,30 @@ export function PortGridItem({
 
       <div className="mb-2 flex-1">
         <h4 className="font-semibold text-sm text-slate-900 dark:text-slate-100 break-words leading-tight">
-          {shouldHighlight
-            ? renderHighlightedText(highlightText(port.owner, searchTerm))
-            : port.owner}
+          {canShowDetails ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setShowDetails(true)}
+                    className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+                  >
+                    {shouldHighlight
+                      ? renderHighlightedText(highlightText(port.owner, searchTerm))
+                      : port.owner}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Open container details</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <span className="truncate inline-flex items-center">
+              {shouldHighlight
+                ? renderHighlightedText(highlightText(port.owner, searchTerm))
+                : port.owner}
+            </span>
+          )}
         </h4>
         {port.note && (
           <p
@@ -167,6 +211,7 @@ export function PortGridItem({
           </p>
         )}
       </div>
+  <InternalPortDetails open={showDetails} onOpenChange={setShowDetails} containerId={port.container_id} serverId={serverId} />
       <div className="flex items-center justify-between text-xs gap-2">
         <span
           className={`inline-flex items-center px-2 py-1 rounded-full font-medium flex-shrink-0 ${

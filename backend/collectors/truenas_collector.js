@@ -35,11 +35,9 @@ class TrueNASCollector extends BaseCollector {
     this.name = "TrueNAS Collector";
     this.client = new TrueNASClient({ debug: this.debug });
     this.procParser = new ProcParser();
-    this.dockerApi = new DockerAPIClient();
-    // Initialize the Docker API
+  this.dockerApi = new DockerAPIClient();
     this._initializeDocker();
 
-    // Initialize cache system
     this.cache = {
       systemInfo: { data: null, timestamp: 0 },
       dockerContainers: { data: null, timestamp: 0 },
@@ -47,7 +45,6 @@ class TrueNASCollector extends BaseCollector {
       hostNetworkContainers: { data: null, timestamp: 0 },
     };
 
-    // Cache timeout configuration (default 60 seconds)
     this.cacheTimeout = parseInt(process.env.CACHE_TIMEOUT_MS || "60000", 10);
     this.cacheDisabled = process.env.DISABLE_CACHE === "true";
     if (this.cacheDisabled) {
@@ -56,7 +53,6 @@ class TrueNASCollector extends BaseCollector {
       );
     }
 
-    // Important ports by service (with protocols)
     this.importantPorts = {
       51820: { service: "WireGuard", protocol: "udp" },
       51821: { service: "WireGuard-UI", protocol: "tcp" },
@@ -480,7 +476,6 @@ class TrueNASCollector extends BaseCollector {
         }
         }
 
-        // Also check for internal-only ports
         const containerInspection = await this.dockerApi.inspectContainer(containerId);
         const exposedPorts = containerInspection.Config.ExposedPorts || {};
         
@@ -488,7 +483,6 @@ class TrueNASCollector extends BaseCollector {
           const [port, protocol] = exposedPort.split('/');
           const portNum = parseInt(port, 10);
           
-          // Check if this port is not already published (has actual host bindings, not null)
           const isPublished = portBindings[exposedPort] && portBindings[exposedPort] !== null;
           
           if (!isNaN(portNum) && !isPublished) {
@@ -544,12 +538,10 @@ class TrueNASCollector extends BaseCollector {
    * @returns {string} Server IP address, now always '0.0.0.0' for wildcard.
    */
   _getServerIP() {
-    // Try to get the server IP from the server's own configuration
     try {
       const os = require("os");
       const networkInterfaces = os.networkInterfaces();
       
-      // Look for primary network interfaces (not Docker bridges or virtual interfaces)
       const primaryInterfaces = ['eth0', 'enp0s3', 'enp0s8', 'ens33', 'ens160', 'em0'];
       
       for (const interfaceName of primaryInterfaces) {
@@ -564,9 +556,7 @@ class TrueNASCollector extends BaseCollector {
         }
       }
       
-      // Fallback: look for any non-internal, non-Docker interface
       for (const [interfaceName, addresses] of Object.entries(networkInterfaces)) {
-        // Skip Docker, bridge, and virtual interfaces
         if (interfaceName.startsWith('docker') || 
             interfaceName.startsWith('br-') ||
             interfaceName.startsWith('veth') ||
@@ -576,7 +566,6 @@ class TrueNASCollector extends BaseCollector {
         
         for (const addr of addresses) {
           if (!addr.internal && addr.family === 'IPv4') {
-            // Prefer private network IPs
             if (addr.address.startsWith('192.168.') ||
                 addr.address.startsWith('10.') ||
                 (addr.address.startsWith('172.') && 
@@ -604,7 +593,6 @@ class TrueNASCollector extends BaseCollector {
   async _getSystemPorts() {
     this.logInfo('=== TrueNAS System Ports Collection (Platform-Adaptive) ===');
     
-    // METHOD 1: Try enhanced /proc parsing first (highest accuracy for containerized environments)
     if (this.procParser) {
       try {
         this.logInfo('Attempting primary method: Enhanced /proc filesystem parsing');
@@ -639,7 +627,6 @@ class TrueNASCollector extends BaseCollector {
       }
     }
     
-    // METHOD 2: Try ss command (fallback for non-containerized environments)
     try {
       this.logInfo('Attempting secondary method: ss command');
       const { stdout } = await execAsync('ss -tulpn 2>/dev/null');
@@ -652,7 +639,6 @@ class TrueNASCollector extends BaseCollector {
       this.logWarn(`ss command failed: ${ssErr.message}, trying tertiary methods`);
     }
 
-    // METHOD 3: Try netstat command
     try {
       this.logInfo('Attempting tertiary method: netstat command');
       const { stdout } = await execAsync('netstat -tulpn 2>/dev/null');
@@ -665,7 +651,6 @@ class TrueNASCollector extends BaseCollector {
       this.logWarn(`netstat command failed: ${netstatErr.message}, trying final fallback`);
     }
 
-    // METHOD 4: Try nsenter for host network access (last resort)
     try {
       this.logInfo('Attempting fallback method: nsenter for host network access');
       const { stdout } = await execAsync('nsenter -t 1 -n ss -tulpn 2>/dev/null');
@@ -698,12 +683,10 @@ class TrueNASCollector extends BaseCollector {
       const cols = line.split(/\s+/);
       if (cols.length < 5) continue;
 
-      // ss output format: Netid State Recv-Q Send-Q Local-Address:Port Peer-Address:Port Process
       const protocol = cols[0].toLowerCase();
       if (!protocol.includes('tcp') && !protocol.includes('udp')) continue;
 
       const state = cols[1];
-      // Only include listening ports
       if (protocol.includes('tcp') && state !== 'LISTEN') continue;
       if (protocol.includes('udp') && state !== 'UNCONN') continue;
 
@@ -711,7 +694,6 @@ class TrueNASCollector extends BaseCollector {
       if (!localAddr || !localAddr.includes(':')) continue;
 
       let host_ip, portStr;
-      // Handle IPv6 addresses [::]:port and IPv4 addresses ip:port
       if (localAddr.includes('[') && localAddr.includes(']:')) {
         const match = localAddr.match(/\[(.+)\]:(\d+)$/);
         if (!match) continue;
@@ -727,13 +709,12 @@ class TrueNASCollector extends BaseCollector {
       const host_port = parseInt(portStr, 10);
       if (isNaN(host_port) || host_port <= 0 || host_port > 65535) continue;
 
-      // Extract process information if available
       let owner = 'unknown';
       let pid = null;
       if (cols.length > 6) {
         const processCol = cols[6];
         if (processCol && processCol !== '-') {
-          // Format: users:(("process",pid=123,fd=5))
+          
           const processMatch = processCol.match(/users:\(\("([^"]+)",pid=(\d+)/);
           if (processMatch) {
             owner = processMatch[1];
@@ -780,14 +761,12 @@ class TrueNASCollector extends BaseCollector {
       const localAddr = cols[3];
       if (!localAddr || !localAddr.includes(':')) continue;
 
-      // Only include listening TCP ports or all UDP ports
       if (protocol.includes('tcp')) {
         const state = cols[5];
         if (state !== 'LISTEN') continue;
       }
 
       let host_ip, portStr;
-      // Handle IPv6 addresses [::]:port and IPv4 addresses ip:port
       if (localAddr.includes('[') && localAddr.includes(']:')) {
         const match = localAddr.match(/\[(.+)\]:(\d+)$/);
         if (!match) continue;
@@ -803,7 +782,6 @@ class TrueNASCollector extends BaseCollector {
       const host_port = parseInt(portStr, 10);
       if (isNaN(host_port) || host_port <= 0 || host_port > 65535) continue;
 
-      // Extract process information if available (last column)
       let owner = 'unknown';
       let pid = null;
       if (cols.length > 6) {
@@ -878,13 +856,12 @@ class TrueNASCollector extends BaseCollector {
     try {
       this.logInfo("Starting core functionality collection (Docker + System)");
 
-      // System Info Collection
       perf.start("system-info-collection");
       try {
         results.systemInfo = await this._getCachedOrFresh(
           "systemInfo",
           () => this._getBasicSystemInfoViaDocket(),
-          30000 // 30 second cache for system info
+          30000
         );
         this.logInfo("Basic system info collected via Docker commands");
       } catch (err) {
@@ -895,13 +872,12 @@ class TrueNASCollector extends BaseCollector {
       }
       perf.end("system-info-collection");
 
-      // Docker Container Collection
       perf.start("docker-containers-collection");
       try {
         const dockerContainers = await this._getCachedOrFresh(
           "dockerContainers",
           () => this._getDockerContainers(),
-          45000 // 45 second cache for containers
+          45000
         );
 
         containerCreationTimeMap = new Map(
@@ -924,7 +900,7 @@ class TrueNASCollector extends BaseCollector {
               size: "N/A",
               mounts: "N/A",
               networks: container.networks || "N/A",
-              ports: [], // Will be populated below with both host-mapped and internal ports
+              ports: [],
             },
           }))
         );
@@ -934,14 +910,12 @@ class TrueNASCollector extends BaseCollector {
       }
       perf.end("docker-containers-collection");
 
-      // Port Collection and Reconciliation
       perf.start("port-collection-and-reconciliation");
       try {
         perf.start("docker-ports-collection");
         const dockerPorts = await this._getDockerPorts();
         perf.end("docker-ports-collection");
 
-        // Group docker ports by container ID for attribution
         const portsByContainer = new Map();
         dockerPorts.forEach(port => {
           if (port.container_id) {
@@ -958,7 +932,6 @@ class TrueNASCollector extends BaseCollector {
           }
         });
 
-        // Populate platform_data.ports for each application
         results.applications.forEach(app => {
           if (app.platform === "docker" && portsByContainer.has(app.id)) {
             app.platform_data.ports = portsByContainer.get(app.id);
@@ -969,7 +942,7 @@ class TrueNASCollector extends BaseCollector {
         const systemPorts = await this._getCachedOrFresh(
           "systemPorts",
           () => this._getSystemPorts(),
-          30000 // 30 second cache for system ports
+          30000
         );
         perf.end("system-ports-collection");
 
@@ -1006,7 +979,6 @@ class TrueNASCollector extends BaseCollector {
         perf.end("pid-to-container-mapping");
 
         perf.start("process-start-times-collection");
-        // Gather process start times for system ports
         const pids = [
           ...new Set(systemPorts.map((p) => p.pid).filter(Boolean)),
         ];
@@ -1039,8 +1011,7 @@ class TrueNASCollector extends BaseCollector {
         const hostProcToContainerMap =
           await this._buildHostProcToContainerMap();
 
-        for (const port of dockerPorts) {
-          // Use different key pattern for internal vs external ports
+  for (const port of dockerPorts) {
           const key = port.internal
             ? `${port.container_id}:${port.host_port}:internal`
             : `${port.host_ip}:${port.host_port}`;
@@ -1060,7 +1031,6 @@ class TrueNASCollector extends BaseCollector {
           let containerIdForPort = null;
           let ownerName = port.owner;
 
-          // Logic for PID-based mapping (from bridged networks)
           if (port.pid && pidToContainerMap.has(port.pid)) {
             const containerInfo = pidToContainerMap.get(port.pid);
             containerIdForPort = containerInfo.id;
@@ -1095,9 +1065,9 @@ class TrueNASCollector extends BaseCollector {
           uniquePorts.set(key, port);
         }
 
-        perf.start("self-container-attribution");
-        const ourPort = parseInt(process.env.PORT || "4999", 10);
-        for (const [key, port] of uniquePorts.entries()) {
+  perf.start("self-container-attribution");
+  const ourPort = parseInt(process.env.PORT || "4999", 10);
+  for (const port of uniquePorts.values()) {
           if (
             port.host_port === ourPort &&
             (port.owner === "node" || port.owner === "system") &&
@@ -1155,7 +1125,6 @@ class TrueNASCollector extends BaseCollector {
               return true;
             }
 
-            // Always include important UDP ports like WireGuard, OpenVPN, etc.
             if (
               port.protocol === "udp" &&
               this.importantUdpPorts[port.host_port]
@@ -1184,7 +1153,6 @@ class TrueNASCollector extends BaseCollector {
       }
       perf.end("port-collection-and-reconciliation");
 
-      // Enhanced Features Collection
       perf.start("enhanced-features-collection");
       const apiKey = process.env.TRUENAS_API_KEY;
       if (apiKey) {
@@ -1274,7 +1242,6 @@ class TrueNASCollector extends BaseCollector {
 
       perf.end("total-collection");
 
-      // Log performance summary at debug level
       const summary = perf.getSummary();
       this.log("=== Performance Summary ===");
       summary.forEach(({ operation, duration }) => {
@@ -1282,7 +1249,6 @@ class TrueNASCollector extends BaseCollector {
       });
       this.log("=== End Performance Summary ===");
 
-      // Log cache status for monitoring
       const cacheStatus = Object.keys(this.cache)
         .map((key) => {
           const cached = this.cache[key];
@@ -1405,7 +1371,7 @@ class TrueNASCollector extends BaseCollector {
           
           return hostContainers;
         },
-        120000 // 2 minute cache
+  120000
       );
 
       if (hostContainerIds.length === 0) {
@@ -1492,13 +1458,11 @@ class TrueNASCollector extends BaseCollector {
         "Collecting TrueNAS system info via Docker API"
       );
 
-      perf.start("docker-version-info");
-      await this.dockerApi._ensureConnected();
-      const [versionInfo, systemInfo] = await Promise.all([
-        this.dockerApi.getSystemVersion(),
-        this.dockerApi.getSystemInfo()
-      ]);
-  // serverVersion may be available via versionInfo.server, but not required here
+  perf.start("docker-version-info");
+  await this.dockerApi._ensureConnected();
+  await this.dockerApi.getSystemVersion();
+  const systemInfo = await this.dockerApi.getSystemInfo();
+  
       perf.end("docker-version-info");
 
       perf.start("proc-meminfo");
@@ -1545,7 +1509,7 @@ class TrueNASCollector extends BaseCollector {
         );
       }
 
-      // Get system uptime
+      
       let uptime = null;
       let uptimeSeconds = 0;
       try {
@@ -1582,10 +1546,10 @@ class TrueNASCollector extends BaseCollector {
         );
       }
 
-      // Get TrueNAS version - try multiple sources
+      
       let truenasVersion = "";
       try {
-        // First check /etc/version which should have the TrueNAS version
+        
         const { stdout: versionFile } = await execAsync(
           'cat /etc/version 2>/dev/null || echo ""'
         );
@@ -1595,7 +1559,7 @@ class TrueNASCollector extends BaseCollector {
           systemInfo.KernelVersion &&
           systemInfo.KernelVersion.includes("truenas")
         ) {
-          // Try to extract version from kernel if possible
+          
           const versionMatch = systemInfo.KernelVersion.match(
             /truenas-(\d+\.\d+\.\d+)/i
           );

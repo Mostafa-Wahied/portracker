@@ -149,7 +149,7 @@ class SystemCollector extends BaseCollector {
     try {
       this.log("Collecting system ports");
       
-      // First try to use /proc parsing if available with effectiveness test
+  
       if (!this.isWindows && this.procParser) {
         try {
           this.log("Testing /proc filesystem access effectiveness...");
@@ -159,7 +159,7 @@ class SystemCollector extends BaseCollector {
             this.log("Attempting to get ports via /proc filesystem");
             const tcpPorts = await this.procParser.getTcpPorts();
             
-            // Use proper UDP filtering logic - include important UDP ports even when INCLUDE_UDP=false
+            
             const includeAllUdp = process.env.INCLUDE_UDP === 'true';
             const udpPorts = await this.procParser.getUdpPorts(includeAllUdp);
             
@@ -190,7 +190,7 @@ class SystemCollector extends BaseCollector {
         }
       }
       
-      // Fallback to existing command-based approach
+  
       if (this.isWindows) {
         return await this.getWindowsPorts();
       } else {

@@ -8,7 +8,6 @@ import {
   Network,
   Activity,
   ArrowDownUp,
-  HardDrive,
   Server as VmIcon,
   LayoutGrid,
   Rows,
@@ -62,7 +61,6 @@ function ServerSectionComponent({
   infoCardLayout,
   onInfoCardLayoutChange,
 }) {
-  // Initialize logger for ServerSection component
   const logger = useMemo(() => new Logger('ServerSection'), []);
   
   const [sortConfig, setSortConfig] = useState(() => {
@@ -85,7 +83,6 @@ function ServerSectionComponent({
     [data]
   );
 
-  // Safety net: sanitize bad saved sort configs on mount
   useEffect(() => {
     const validKeys = ["default", "host_port", "owner", "created"];
     let { key, direction } = sortConfig;
@@ -100,8 +97,8 @@ function ServerSectionComponent({
       changed = true;
     }
     if (changed) setSortConfig({ key, direction });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    
+  }, [sortConfig]);
 
   const sortedPorts = useMemo(() => {
     let sortablePorts = [...visiblePorts];
@@ -120,7 +117,6 @@ function ServerSectionComponent({
 
     if (sortConfig.key) {
       sortablePorts.sort((a, b) => {
-        // Numeric sorts
         if (sortConfig.key === "host_port") {
           const portA = parseInt(a.host_port, 10) || 0;
           const portB = parseInt(b.host_port, 10) || 0;
@@ -132,7 +128,6 @@ function ServerSectionComponent({
           return asc ? aNum - bNum : bNum - aNum;
         }
 
-        // Safe string sort
         const valA = normalizeForSort(a[sortConfig.key]).toLowerCase();
         const valB = normalizeForSort(b[sortConfig.key]).toLowerCase();
 
@@ -172,7 +167,6 @@ function ServerSectionComponent({
   const hasVMs = vms && vms.length > 0;
 
   const getHostDisplay = () => {
-    // For local server, use the current window's host (where the app is running)
     if (!serverUrl) {
       return window.location.host || "localhost";
     }
@@ -294,7 +288,6 @@ function ServerSectionComponent({
         </div>
       )}
 
-      {/* Ports Section Card */}
       <div className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50 shadow-sm">
         <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-700/50">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
