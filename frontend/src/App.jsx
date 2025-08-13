@@ -1100,7 +1100,7 @@ export default function App() {
                 searchTerm && searchScope === "all" ? (
                   <div className="space-y-8">{renderAllMatchingServers()}</div>
                 ) : (
-                  <div className="text-center py-24 text-slate-500 dark:text-slate-400 flex flex-col items-center">
+                  <div className="text-center py-24 text-slate-500 dark:text-slate-400 flex flex-col items-center animate-in fade-in-0 duration-300">
                     <BarChart3 className="h-16 w-16 mb-4 text-slate-400" />
                     <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">
                       Dashboard Home
@@ -1122,11 +1122,11 @@ export default function App() {
               )}
 
               {!loading && serverToRender && !(searchTerm && searchScope === "all") && (
-                <div className="space-y-8">{renderServer(serverToRender)}</div>
+                <div className="space-y-8 animate-in fade-in-0 duration-300">{renderServer(serverToRender)}</div>
               )}
 
               {!loading && selectedServer && searchTerm && searchScope === "all" && (
-                <div className="space-y-8">{renderAllMatchingServers()}</div>
+                <div className="space-y-8 animate-in fade-in-0 duration-300">{renderAllMatchingServers()}</div>
               )}
             </div>
           </main>

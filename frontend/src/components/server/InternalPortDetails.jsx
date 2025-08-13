@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, startTransition } from "react";
 import { createPortal } from 'react-dom';
 import {
   DrawerContent,
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Copy, ChevronDown, ChevronUp, Check, Box, Activity, Globe2, Network, Terminal, Settings2, Tag, HardDrive, Info, Gauge, Cpu, FileJson, Download, RefreshCw } from "lucide-react";
+import { StatsSkeleton } from './parts/StatsSkeleton';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InfoTile } from './parts/InfoTile';
@@ -26,6 +27,8 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   const { copiedKey, copy } = useClipboard();
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [, forceTick] = useState(0);
+  const [isVisible, setIsVisible] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
   const cmdRef = useRef(null);
   const drawerRef = useRef(null);
   const previouslyFocusedRef = useRef(null);
@@ -54,28 +57,45 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
     return "/bin/sh";
   };
 
+  
   useEffect(() => {
     if (!open || !containerId) return;
-    const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-    const qs = serverId ? `?server_id=${encodeURIComponent(serverId)}` : "";
-    fetch(`/api/containers/${encodeURIComponent(containerId)}/details${qs}`, { signal: controller.signal })
-      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-      .then((json) => {
-        setData(json);
-        try {
-          setShell((prev) => prev || guessShell(json.image));
-        } catch {
-          setShell('/bin/sh');
-        }
+    if (isAnimating) return;
+    
+    const ANIMATION_COMPLETE_DELAY = 300;
+    const fetchTimeout = setTimeout(() => {
+      const controller = new AbortController();
+      setLoading(true);
+      setError(null);
+      const qs = serverId ? `?server_id=${encodeURIComponent(serverId)}` : "";
+      
+      fetch(`/api/containers/${encodeURIComponent(containerId)}/details${qs}`, { 
+        signal: controller.signal,
+        priority: 'high'
       })
-      .catch((e) => {
-        if (e.name !== 'AbortError') setError(e.message);
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [open, containerId, serverId]);
+        .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        .then((json) => {
+          startTransition(() => {
+            setData(json);
+            try {
+              setShell((prev) => prev || guessShell(json.image));
+            } catch {
+              setShell('/bin/sh');
+            }
+          });
+        })
+        .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
+        .finally(() => setLoading(false));
+      
+      drawerRef.current && (drawerRef.current._detailsAbort = controller);
+    }, ANIMATION_COMPLETE_DELAY);
+    
+    return () => {
+      clearTimeout(fetchTimeout);
+      const ctl = drawerRef.current?._detailsAbort;
+      if (ctl) ctl.abort();
+    };
+  }, [open, containerId, serverId, isAnimating]);
 
   const execTarget = data?.name || data?.id || containerId;
   const execCmd = `docker exec -it ${execTarget} ${shell}`;
@@ -95,17 +115,58 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
       .catch(e => setRawState({ loading: false, error: e.message, data: null }));
   };
 
+  useLayoutEffect(() => {
+    if (drawerRef.current) {
+      const drawer = drawerRef.current;
+      drawer.style.transform = 'translate3d(100%, 0, 0)';
+      drawer.style.willChange = 'transform';
+      drawer.style.backfaceVisibility = 'hidden';
+    }
+  }, [isVisible]);
+
   useEffect(() => {
     if (open) {
+      document.body.style.overflowY = 'hidden';
+      setIsVisible(true);
+      setIsAnimating(true);
       previouslyFocusedRef.current = document.activeElement;
-      setTimeout(() => {
+      
+      requestAnimationFrame(() => {
+        if (drawerRef.current) {
+          drawerRef.current.style.transform = '';
+        }
         drawerRef.current?.querySelector('[data-autofocus]')?.focus();
-      }, 0);
+      });
+      
       if (announceRef.current) {
         announceRef.current.textContent = 'Container details panel opened';
       }
+      
+      const ANIMATION_DURATION = 250;
+      setTimeout(() => {
+        setIsAnimating(false);
+        if (drawerRef.current) {
+          drawerRef.current.style.willChange = 'auto';
+        }
+      }, ANIMATION_DURATION);
     } else if (!open && previouslyFocusedRef.current) {
-  try { previouslyFocusedRef.current.focus(); } catch { void 0; }
+      setIsAnimating(true);
+      if (drawerRef.current) {
+        drawerRef.current.style.willChange = 'transform';
+      }
+      
+      const ANIMATION_DURATION = 250;
+      
+      setTimeout(() => {
+        setIsVisible(false);
+        setIsAnimating(false);
+        document.body.style.overflowY = '';
+        if (drawerRef.current) {
+          drawerRef.current.style.willChange = 'auto';
+        }
+      }, ANIMATION_DURATION);
+      
+      try { previouslyFocusedRef.current.focus(); } catch { void 0; }
       if (announceRef.current) {
         announceRef.current.textContent = 'Container details panel closed';
       }
@@ -113,7 +174,8 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   }, [open]);
 
   const refreshStats = useCallback((initial=false) => {
-    if (!open || !containerId) return;
+    if (!open || !containerId || isAnimating) return;
+    
     if (statsAbortRef.current) statsAbortRef.current.abort();
     const controller = new AbortController();
     statsAbortRef.current = controller;
@@ -139,7 +201,7 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
       })
       .catch(e => { if (e.name !== 'AbortError') setStatsError(e.message || 'Failed to load stats'); })
       .finally(() => setStatsLoading(false));
-  }, [open, containerId, serverId]);
+  }, [open, containerId, serverId, isAnimating]);
 
   useEffect(() => {
     if (open && containerId && data && !data.stats && !statsAttempted && !statsLoading && !statsError) {
@@ -147,11 +209,32 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
     }
   }, [open, containerId, data, statsAttempted, statsLoading, statsError, refreshStats]);
 
+  
   useEffect(() => {
     if (!open) return;
-    const interval = setInterval(() => forceTick(t => t + 1), 1000);
-    return () => clearInterval(interval);
-  }, [open]);
+    if (isAnimating) return;
+    
+    const ANIMATION_COMPLETE_DELAY = 300;
+    let intervalId = null;
+    
+    const startTimeout = setTimeout(() => {
+      intervalId = setInterval(() => {
+        if (!document.hidden) {
+          startTransition(() => forceTick(t => t + 1));
+        }
+      }, 1000);
+      if (drawerRef.current) {
+        drawerRef.current._tickInterval = intervalId;
+      }
+    }, ANIMATION_COMPLETE_DELAY);
+    
+    return () => {
+      clearTimeout(startTimeout);
+      if (intervalId) clearInterval(intervalId);
+      const intId = drawerRef.current?._tickInterval;
+      if (intId) clearInterval(intId);
+    };
+  }, [open, isAnimating]);
 
   useEffect(() => {
     if (copiedKey && liveRegionRef.current) {
@@ -183,13 +266,13 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
     }
   }, [onOpenChange, handleCopyGeneric]);
 
-  if (!open) return null;
+  if (!isVisible) return null;
 
   return createPortal(
     <>
       <DrawerOverlay
         onClick={() => onOpenChange(false)}
-        className="animate-fade-in-overlay"
+        data-state={open ? "open" : "closed"}
       />
       <DrawerContent
         role="dialog"
@@ -197,9 +280,11 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
         aria-labelledby="container-details-title"
         onKeyDown={handleKeyDown}
         ref={drawerRef}
-        className={`flex flex-col h-full outline-none transition-transform duration-300 ease-out sm:max-w-lg md:max-w-xl w-full max-w-[680px] border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 ${open ? 'animate-slide-in-from-right' : 'animate-slide-out-to-right'}`}
+        data-state={open ? "open" : "closed"}
+        className="flex flex-col h-full outline-none sm:max-w-lg md:max-w-xl lg:max-w-2xl w-full"
+        data-animation-ready="true"
       >
-  <DrawerClose onClick={() => onOpenChange(false)} data-autofocus />
+        <DrawerClose onClick={() => onOpenChange(false)} data-autofocus />
   <DrawerHeader className="pb-3 pr-10 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <Box className="w-5 h-5 text-slate-500" />
@@ -215,8 +300,23 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
           <div ref={liveRegionRef} aria-live="polite" className="sr-only" />
           <div ref={announceRef} aria-live="polite" className="sr-only" />
           <p id="container-details-help" className="sr-only">Use Tab to move, Escape to close. Copy buttons announce success. Sections are collapsible.</p>
-          {loading && <div className="text-sm text-slate-500 px-1">Loading…</div>}
-          {error && <div className="text-sm text-red-600 px-1">{error}</div>}
+          
+          {loading && (
+            <div className="flex items-center gap-2 text-sm text-slate-500 px-1">
+              <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin"></div>
+              Loading container details...
+            </div>
+          )}
+          
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-600 px-1">
+              <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              {error}
+            </div>
+          )}
+          
           {data && (
             <div className="space-y-8 px-1">
               <section className="space-y-6">
@@ -307,7 +407,7 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
                           </div>
                         )}
                         {data.stats && (
-                          <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 space-y-1 text-xs relative">
+                          <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 space-y-1 text-xs relative sm:col-span-2">
                             <div className="flex items-center justify-between">
                               <div className="font-medium flex items-center gap-1 text-slate-600 dark:text-slate-300"><Cpu className="w-3.5 h-3.5" /> Stats</div>
                               <TooltipProvider>
@@ -340,11 +440,17 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
                                 </Tooltip>
                               </TooltipProvider>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
-                              {data.stats.cpuPercent != null && <span>CPU: {data.stats.cpuPercent.toFixed(1)}%</span>}
-                              {data.stats.memUsagePercent != null && <span>Mem: {data.stats.memUsagePercent.toFixed(1)}%</span>}
-                              {data.stats.memBytes != null && <span>MemUse: {formatBytes(data.stats.memBytes)}</span>}
-                              {data.stats.memLimitBytes != null && <span>MemLim: {formatBytes(data.stats.memLimitBytes)}</span>}
+                            <div className="grid grid-cols-2 gap-2 font-mono text-[11px] min-h-[28px]">
+                              {data.stats ? (
+                                <>
+                                  {data.stats.cpuPercent != null && <span>CPU: {data.stats.cpuPercent.toFixed(1)}%</span>}
+                                  {data.stats.memUsagePercent != null && <span>Mem: {data.stats.memUsagePercent.toFixed(1)}%</span>}
+                                  {data.stats.memBytes != null && <span>MemUse: {formatBytes(data.stats.memBytes)}</span>}
+                                  {data.stats.memLimitBytes != null && <span>MemLim: {formatBytes(data.stats.memLimitBytes)}</span>}
+                                </>
+                              ) : (
+                                <StatsSkeleton />
+                              )}
                             </div>
                             {data.statsSampledAt && (
                               <div className="text-[10px] text-slate-500">{(() => {
@@ -361,10 +467,14 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
                           </div>
                         )}
                         {!data.stats && !statsLoading && !statsError && !statsAttempted && (
-                          <div className="p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/20 text-xs text-slate-500">No stats loaded yet. Use Refresh Stats.</div>
+                          <div className="p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/40 dark:bg-slate-900/20 text-xs text-slate-500 sm:col-span-2">
+                            <div className="mb-2 font-medium text-[10px] uppercase tracking-wide text-slate-500">Stats</div>
+                            <StatsSkeleton />
+                            <div className="mt-2 text-[10px] text-slate-500">Use the refresh icon to load live container usage.</div>
+                          </div>
                         )}
                         {!data.stats && !statsLoading && !statsError && statsAttempted && statsUnavailableReason && (
-                          <div className="p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 text-xs text-amber-700 dark:text-amber-300 flex flex-col gap-2">
+                          <div className="p-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 text-xs text-amber-700 dark:text-amber-300 flex flex-col gap-2 sm:col-span-2">
                             <div className="flex items-center justify-between gap-2">
                               <span className="font-medium">Stats unavailable</span>
                               <Button
@@ -402,8 +512,11 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
                             </span>
                           </div>
                         )}
-                        {statsLoading && (
-                          <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 text-xs text-slate-500 flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Loading stats…</div>
+                        {!data.stats && statsLoading && (
+                          <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/40 text-xs text-slate-500 flex items-center gap-4 sm:col-span-2">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <div className="flex-1"><StatsSkeleton /></div>
+                          </div>
                         )}
                       </div>
                     </div>

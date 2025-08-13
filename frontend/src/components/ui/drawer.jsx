@@ -13,9 +13,19 @@ const DrawerContent = React.forwardRef(({ className, children, ...props }, ref) 
   <div
     ref={ref}
     className={cn(
-      "fixed inset-y-0 right-0 z-50 h-full w-full border-l bg-background p-6 shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
+      "fixed inset-y-0 right-0 z-50 h-full w-full border-l bg-background p-6 shadow-lg sm:max-w-sm",
+      "transform translate3d(100%, 0, 0)",
+      "data-[state=open]:animate-[slideInRight_250ms_ease-out_forwards]",
+      "data-[state=closed]:animate-[slideOutRight_250ms_ease-in_forwards]",
       className
     )}
+    style={{
+      willChange: 'transform',
+      backfaceVisibility: 'hidden',
+      perspective: 1000,
+      transformStyle: 'preserve-3d',
+      contain: 'layout style paint'
+    }}
     {...props}
   >
     {children}
@@ -27,9 +37,16 @@ const DrawerOverlay = React.forwardRef(({ className, ...props }, ref) => (
   <div
     ref={ref}
     className={cn(
-      "fixed inset-0 z-40 bg-background/80 backdrop-blur-sm transition-all duration-100 data-[state=closed]:animate-out data-[state=closed]:fade-out data-[state=open]:fade-in",
+      "fixed inset-0 z-40 bg-black/50",
+      "opacity-0",
+      "data-[state=open]:animate-[fadeIn_200ms_ease-out_forwards]",
+      "data-[state=closed]:animate-[fadeOut_200ms_ease-in_forwards]",
       className
     )}
+    style={{
+      willChange: 'opacity',
+      backfaceVisibility: 'hidden'
+    }}
     {...props}
   />
 ))
