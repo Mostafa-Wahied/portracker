@@ -17,6 +17,9 @@ export function PortTable({
   onToggleIgnore,
   sortConfig,
   onSort,
+  deepLinkContainerId,
+  onOpenContainerDetails,
+  onCloseContainerDetails,
 }) {
   const getSortIcon = (column) => {
     if (sortConfig.key !== column) {
@@ -116,6 +119,9 @@ export function PortTable({
               onCopy={onCopy}
               onNote={onNote}
               onToggleIgnore={onToggleIgnore}
+              forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
+              notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
+              notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
             />
           ))}
         </tbody>

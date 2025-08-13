@@ -62,6 +62,9 @@ function ServerSectionComponent({
   onAccordionChange,
   infoCardLayout,
   onInfoCardLayoutChange,
+  deepLinkContainerId,
+  onOpenContainerDetails,
+  onCloseContainerDetails,
 }) {
   const logger = useMemo(() => new Logger('ServerSection'), []);
   
@@ -98,9 +101,7 @@ function ServerSectionComponent({
   useEffect(() => {
     try {
       localStorage.setItem(`showInternalPorts:${id}`, JSON.stringify(showInternal));
-    } catch {
-      /* Failed to save to localStorage - not critical */
-    }
+  } catch { void 0; }
   }, [id, showInternal]);
 
   const visiblePorts = useMemo(
@@ -140,7 +141,14 @@ function ServerSectionComponent({
     let sortablePorts = [...visiblePorts];
 
     if (sortConfig.key === "default") {
-      return sortablePorts;
+      return sortablePorts.sort((a, b) => {
+        const aWeight = a.internal ? 1 : 0;
+        const bWeight = b.internal ? 1 : 0;
+        if (aWeight !== bWeight) return aWeight - bWeight;
+        const aPort = parseInt(a.host_port || a.container_port, 10) || 0;
+        const bPort = parseInt(b.host_port || b.container_port, 10) || 0;
+        return aPort - bPort;
+      });
     }
 
     const asc = sortConfig.direction === "ascending";
@@ -366,6 +374,7 @@ function ServerSectionComponent({
                           ? "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 shadow-sm"
                           : "border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700"
                       }`}
+                      aria-pressed={showInternal}
                     >
                       <Lock className="h-4 w-4 mr-2" />
                       {showInternal ? "Internal: On" : "Internal: Off"}
@@ -611,6 +620,9 @@ function ServerSectionComponent({
                     onToggleIgnore={onToggleIgnore}
                     serverId={id}
                     serverUrl={serverUrl}
+                    forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
+                    notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
+                    notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
                   />
                 ))}
               </ul>
@@ -638,6 +650,9 @@ function ServerSectionComponent({
                     onToggleIgnore={onToggleIgnore}
                     serverId={id}
                     serverUrl={serverUrl}
+                    forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
+                    notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
+                    notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
                   />
                 ))}
               </ul>
@@ -660,6 +675,9 @@ function ServerSectionComponent({
                     onToggleIgnore={onToggleIgnore}
                     serverId={id}
                     serverUrl={serverUrl}
+                    forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
+                    notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
+                    notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
                   />
                 ))}
               </div>
@@ -684,6 +702,9 @@ function ServerSectionComponent({
                         : "ascending",
                   }))
                 }
+                deepLinkContainerId={deepLinkContainerId}
+                onOpenContainerDetails={onOpenContainerDetails}
+                onCloseContainerDetails={onCloseContainerDetails}
               />
             )}
 

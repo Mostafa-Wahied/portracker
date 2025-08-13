@@ -18,6 +18,9 @@ const collectors = {
   system: SystemCollector,
 };
 
+const collectorInstances = new Map();
+const collectorInitState = new Map();
+
 /**
  * Create an appropriate collector for the given platform type
  * @param {string} platform Platform identifier
@@ -25,8 +28,28 @@ const collectors = {
  * @returns {BaseCollector} A collector instance
  */
 function createCollector(platform = "base", config = {}) {
-  const CollectorClass = collectors[platform] || BaseCollector;
-  return new CollectorClass(config);
+  const key = platform || "base";
+  if (collectorInstances.has(key)) return collectorInstances.get(key);
+  const CollectorClass = collectors[key] || BaseCollector;
+  const instance = new CollectorClass(config);
+  collectorInstances.set(key, instance);
+  if (typeof instance.initialize === 'function') {
+    try {
+      const p = Promise.resolve(instance.initialize()).catch(()=>{});
+      collectorInitState.set(key, p);
+    } catch { void 0; }
+  }
+  return instance;
+}
+
+async function getCollectorAsync(platform = "base", config = {}) {
+  const inst = createCollector(platform, config);
+  const key = platform || "base";
+  const initPromise = collectorInitState.get(key);
+  if (initPromise) {
+    try { await initPromise; } catch { void 0; }
+  }
+  return inst;
 }
 
 /**
@@ -53,24 +76,16 @@ async function detectCollector(config = {}) {
 
   for (const type of collectorTypes) {
     if (!collectors[type]) continue;
-
-    const collector = createCollector(type, { debug });
+    let tempInstance;
+    try { tempInstance = new (collectors[type])( { debug } ); } catch { continue; }
     logger.debug(`Attempting compatibility check for ${type}...`);
-
     try {
-      const score = await collector.isCompatible();
+      const score = await tempInstance.isCompatible();
       detectionDetails[type] = score;
-
-      if (debug) {
-        logger.debug(`Compatibility score for ${type}: ${score}`);
-      }
-
+      if (debug) logger.debug(`Compatibility score for ${type}: ${score}`);
       if (score > highestScore) {
         highestScore = score;
-        bestCollector = collector;
-        logger.debug(
-          `New best collector: ${type} (score: ${score}, previous best: ${highestScore})`
-        );
+        bestCollector = type;
       }
     } catch (err) {
       logger.warn(`Error checking compatibility for ${type}:`, err.message);
@@ -83,18 +98,15 @@ async function detectCollector(config = {}) {
   }
 
   if (bestCollector && highestScore > 0) {
-    const message = `Auto-detected ${bestCollector.platform} collector with score ${highestScore}`;
-    logger.info(message);
+    const instance = createCollector(bestCollector, { debug });
+    logger.info(`Auto-detected ${bestCollector} collector with score ${highestScore}`);
     logger.debug("--- detectCollector END (returning bestCollector) ---");
-    return bestCollector;
+    return instance;
   }
-
-  const systemCollector = createCollector("system", { debug });
-  logger.info(
-    "No compatible collector detected with score > 0, using system collector"
-  );
+  const fallback = createCollector("system", { debug });
+  logger.info("No compatible collector detected with score > 0, using system collector");
   logger.debug("--- detectCollector END (returning system fallback) ---");
-  return systemCollector;
+  return fallback;
 }
 
 /**
@@ -106,10 +118,17 @@ function registerCollector(platform, CollectorClass) {
   collectors[platform] = CollectorClass;
 }
 
+function resetCollectors() {
+  collectorInstances.clear();
+  collectorInitState.clear();
+}
+
 module.exports = {
   BaseCollector,
   createCollector,
+  getCollectorAsync,
   detectCollector,
   registerCollector,
   collectors,
+  resetCollectors,
 };

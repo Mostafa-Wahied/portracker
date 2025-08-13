@@ -34,24 +34,10 @@ class TrueNASCollector extends BaseCollector {
     this.platformName = "TrueNAS";
     this.name = "TrueNAS Collector";
     this.client = new TrueNASClient({ debug: this.debug });
-    this.procParser = new ProcParser();
+  this.procParser = new ProcParser();
   this.dockerApi = new DockerAPIClient();
     this._initializeDocker();
-
-    this.cache = {
-      systemInfo: { data: null, timestamp: 0 },
-      dockerContainers: { data: null, timestamp: 0 },
-      systemPorts: { data: null, timestamp: 0 },
-      hostNetworkContainers: { data: null, timestamp: 0 },
-    };
-
-    this.cacheTimeout = parseInt(process.env.CACHE_TIMEOUT_MS || "60000", 10);
-    this.cacheDisabled = process.env.DISABLE_CACHE === "true";
-    if (this.cacheDisabled) {
-      this.logWarn(
-        "Caching is globally disabled via DISABLE_CACHE environment variable."
-      );
-    }
+  this.cacheDisabled = this.cacheDisabled || process.env.DISABLE_CACHE === 'true';
 
     this.importantPorts = {
       51820: { service: "WireGuard", protocol: "udp" },
@@ -858,11 +844,7 @@ class TrueNASCollector extends BaseCollector {
 
       perf.start("system-info-collection");
       try {
-        results.systemInfo = await this._getCachedOrFresh(
-          "systemInfo",
-          () => this._getBasicSystemInfoViaDocket(),
-          30000
-        );
+  results.systemInfo = await this.cacheGetOrSet('systemInfo', () => this._getBasicSystemInfoViaDocket(), { ttlMs: 30000 });
         this.logInfo("Basic system info collected via Docker commands");
       } catch (err) {
         this.logWarn(
@@ -875,13 +857,7 @@ class TrueNASCollector extends BaseCollector {
 
       perf.start("docker-containers-collection");
       try {
-        const dockerContainers = await this._getCachedOrFresh(
-          "dockerContainers",
-          () => this._getDockerContainers(),
-          45000
-        );
-
-        containerCreationTimeMap = new Map(
+      const dockerContainers = await this.cacheGetOrSet('dockerContainers', () => this._getDockerContainers(), { ttlMs: 45000 });        containerCreationTimeMap = new Map(
           dockerContainers.map((c) => [c.id, c.created])
         );
 
@@ -940,11 +916,7 @@ class TrueNASCollector extends BaseCollector {
         });
 
         perf.start("system-ports-collection");
-        const systemPorts = await this._getCachedOrFresh(
-          "systemPorts",
-          () => this._getSystemPorts(),
-          30000
-        );
+  const systemPorts = await this.cacheGetOrSet('systemPorts', () => this._getSystemPorts(), { ttlMs: 30000 });
         perf.end("system-ports-collection");
 
         perf.start("pid-to-container-mapping");
@@ -1250,16 +1222,27 @@ class TrueNASCollector extends BaseCollector {
       });
       this.log("=== End Performance Summary ===");
 
-      const cacheStatus = Object.keys(this.cache)
-        .map((key) => {
-          const cached = this.cache[key];
-          if (cached.data) {
-            const age = ((Date.now() - cached.timestamp) / 1000).toFixed(1);
-            return `${key}: ${age}s old`;
-          }
-          return `${key}: empty`;
-        })
-        .join(", ");
+      let cacheStatus = "empty";
+      try {
+        if (this._cache && this._cache.store && this._cache.store.size > 0) {
+          cacheStatus = Array.from(this._cache.store.entries())
+            .map(([key, entry]) => {
+              const remainingMs = entry.expires === 0 ? "no-expiry" : `${Math.max(0, entry.expires - Date.now())}ms ttl-left`;
+              let valueDesc;
+              if (Array.isArray(entry.value)) {
+                valueDesc = `array(len=${entry.value.length})`;
+              } else if (entry && typeof entry.value === 'object') {
+                valueDesc = `object(${Object.keys(entry.value).length} keys)`;
+              } else {
+                valueDesc = typeof entry.value;
+              }
+              return `${key}: ${valueDesc} (${remainingMs})`;
+            })
+            .join(', ');
+        }
+      } catch (cacheDiagErr) {
+        cacheStatus = `diagnostic-error: ${cacheDiagErr.message}`;
+      }
 
       this.log(`Cache status: ${cacheStatus}`);
       this.logInfo(
@@ -1352,9 +1335,7 @@ class TrueNASCollector extends BaseCollector {
     const pidToContainerMap = new Map();
 
     try {
-      const hostContainerIds = await this._getCachedOrFresh(
-        "hostNetworkContainers",
-        async () => {
+      const hostContainerIds = await this.cacheGetOrSet('hostNetworkContainers', async () => {
           await this.dockerApi._ensureConnected();
           const containers = await this.dockerApi.listContainers();
           const hostContainers = [];
@@ -1371,19 +1352,14 @@ class TrueNASCollector extends BaseCollector {
           }
           
           return hostContainers;
-        },
-  120000
-      );
+        }, { ttlMs: 120000 });
 
       if (hostContainerIds.length === 0) {
         perf.end("build-host-proc-map");
         return pidToContainerMap;
       }
 
-      const dockerContainers = await this._getCachedOrFresh(
-        "dockerContainers",
-        () => this._getDockerContainers()
-      );
+      const dockerContainers = await this.cacheGetOrSet('dockerContainers', () => this._getDockerContainers(), { ttlMs: 45000 });
       const idToNameMap = new Map(
         dockerContainers.map((c) => [c.id.substring(0, 12), c.name])
       );
@@ -1443,7 +1419,7 @@ class TrueNASCollector extends BaseCollector {
       const ppidMatch = stdout.match(/^PPid:\s*(\d+)/m);
       return ppidMatch ? parseInt(ppidMatch[1], 10) : null;
     } catch {
-      /* Process no longer exists or permission denied */
+      
       return null;
     }
   }
@@ -1460,10 +1436,10 @@ class TrueNASCollector extends BaseCollector {
         "Collecting TrueNAS system info via Docker API"
       );
 
-  perf.start("docker-version-info");
-  await this.dockerApi._ensureConnected();
-  await this.dockerApi.getSystemVersion();
-  const systemInfo = await this.dockerApi.getSystemInfo();
+      perf.start("docker-version-info");
+      await this.dockerApi._ensureConnected();
+      await this.dockerApi.getSystemVersion();
+      const systemInfo = await this.dockerApi.getSystemInfo();
   
       perf.end("docker-version-info");
 
@@ -1828,52 +1804,6 @@ class TrueNASCollector extends BaseCollector {
    * @param {number} customTimeout Optional custom timeout override
    * @returns {Promise<any>} Cached or fresh data
    */
-  async _getCachedOrFresh(cacheKey, fetchFunction, customTimeout = null) {
-    if (this.cacheDisabled) {
-      this.log(`Cache disabled for ${cacheKey}, fetching fresh data.`);
-      return await fetchFunction();
-    }
-
-    const now = Date.now();
-    const timeout = customTimeout || this.cacheTimeout;
-    const cached = this.cache[cacheKey];
-
-    if (cached && cached.data && now - cached.timestamp < timeout) {
-      const age = ((now - cached.timestamp) / 1000).toFixed(1);
-      this.log(`Using cached ${cacheKey} data (${age}s old)`);
-      return cached.data;
-    }
-
-    this.log(`Cache miss for ${cacheKey}, fetching fresh data`);
-    const freshData = await fetchFunction();
-    this.cache[cacheKey] = {
-      data: freshData,
-      timestamp: now,
-    };
-
-    return freshData;
-  }
-
-  /**
-   * Clear specific cache entry
-   * @param {string} cacheKey Cache key to clear
-   */
-  _clearCache(cacheKey) {
-    if (this.cache[cacheKey]) {
-      this.cache[cacheKey] = { data: null, timestamp: 0 };
-      this.log(`Cleared cache for: ${cacheKey}`);
-    }
-  }
-
-  /**
-   * Clear all cache entries
-   */
-  _clearAllCache() {
-    Object.keys(this.cache).forEach((key) => {
-      this.cache[key] = { data: null, timestamp: 0 };
-    });
-    this.log("Cleared all cache entries");
-  }
 }
 
 module.exports = TrueNASCollector;

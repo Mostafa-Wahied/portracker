@@ -26,7 +26,7 @@ class DockerCollector extends BaseCollector {
     this.platformName = "Docker";
     this.name = "Docker Collector";
     this.procParser = new ProcParser();
-    this.dockerApi = new DockerAPIClient();
+  this.dockerApi = new DockerAPIClient();
   }
 
   async initialize() {
@@ -146,124 +146,127 @@ class DockerCollector extends BaseCollector {
    * @returns {Promise<Array>} List of port entries
    */
   async getPorts() {
-    try {
-      const allPorts = [];
-      const dockerPortsMap = new Map();
-      const dockerProcessMap = new Map();
-      const containerCreationTimeMap = new Map();
-
+    const ttl = parseInt(process.env.DOCKER_CACHE_PORTS_TTL_MS || '4000', 10);
+    return this.cacheGetOrSet('ports', async () => {
       try {
-        const dockerContainers = await this.getApplications();
-        dockerContainers.forEach((container) => {
-          if (container.created) {
-            containerCreationTimeMap.set(container.id, container.created);
-          }
-        });
+        const allPorts = [];
+        const dockerPortsMap = new Map();
+        const dockerProcessMap = new Map();
+        const containerCreationTimeMap = new Map();
 
-        const dockerPorts = await this._getDockerContainerPorts();
-        dockerPorts.forEach((port) => {
-          const key = `${port.host_ip}:${port.host_port}`;
-          if (!dockerPortsMap.has(key)) {
-            if (port.container_id) {
-              port.created = containerCreationTimeMap.get(port.container_id) || null;
+        try {
+          const dockerContainers = await this.getApplications();
+            dockerContainers.forEach((container) => {
+            if (container.created) {
+              containerCreationTimeMap.set(container.id, container.created);
             }
-            dockerPortsMap.set(key, port);
-            allPorts.push(port);
-          }
-        });
+          });
 
-        const allRunningContainers = await this._getHostNetworkContainers();
-        allRunningContainers.forEach((container) => {
-          if (container.pids && container.pids.length > 0) {
-            container.pids.forEach((pid) => {
-              dockerProcessMap.set(pid, container);
-            });
-          }
-
-          if (container.internalPorts && container.internalPorts.length > 0) {
-            container.internalPorts.forEach((internalPort) => {
-              const publishedKey = `${internalPort.host_ip}:${internalPort.host_port}`;
-              const internalKey = `${internalPort.host_ip}:${internalPort.host_port}:${container.id}:internal`;
-              
-              if (!dockerPortsMap.has(publishedKey) && !dockerPortsMap.has(internalKey)) {
-                internalPort.created = containerCreationTimeMap.get(container.id) || null;
-                dockerPortsMap.set(internalKey, internalPort);
-                allPorts.push(this.normalizePortEntry(internalPort));
-              }
-            });
-          }
-        });
-      } catch (dockerErr) {
-        this.logWarn("Failed to collect Docker container-specific data:", dockerErr.message);
-      }
-
-      try {
-        const systemPorts = await this._getSystemPorts();
-
-        for (const port of systemPorts) {
-          const key = `${port.host_ip}:${port.host_port}`;
-          if (dockerPortsMap.has(key)) {
-            continue;
-          }
-
-          let dockerInfo = null;
-
-          if (port.pids && port.pids.length > 0) {
-            for (const pid of port.pids) {
-              if (dockerProcessMap.has(pid)) {
-                const container = dockerProcessMap.get(pid);
-                dockerInfo = {
-                  containerName: container.name,
-                  containerId: container.id,
-                  target: `${container.id.substring(0, 12)}:internal(host-net)`,
-                };
-                port.created = containerCreationTimeMap.get(container.id) || null;
-                break;
-              }
-            }
-          }
-
-          if (!dockerInfo) {
-            dockerInfo = await this._checkIfPortBelongsToDocker(port);
-            if (dockerInfo && dockerInfo.containerId) {
-              port.created = containerCreationTimeMap.get(dockerInfo.containerId) || null;
-            }
-          }
-
-          if (dockerInfo) {
-            const dockerPort = this.normalizePortEntry({
-              ...port,
-              source: "docker",
-              owner: dockerInfo.containerName,
-              target: dockerInfo.target,
-              container_id: dockerInfo.containerId,
-              app_id: dockerInfo.containerName,
-            });
-
+          const dockerPorts = await this._getDockerContainerPorts();
+          dockerPorts.forEach((port) => {
+            const key = `${port.host_ip}:${port.host_port}`;
             if (!dockerPortsMap.has(key)) {
-              allPorts.push(dockerPort);
-              dockerPortsMap.set(key, dockerPort);
+              if (port.container_id) {
+                port.created = containerCreationTimeMap.get(port.container_id) || null;
+              }
+              dockerPortsMap.set(key, port);
+              allPorts.push(port);
             }
-          } else {
-            allPorts.push(port);
-          }
-        }
-      } catch (systemErr) {
-        this.logWarn("Failed to collect and process system ports:", systemErr.message);
-      }
+          });
 
-      this.logInfo(`Total unique ports collected: ${allPorts.length}`);
-      return allPorts;
-    } catch (err) {
-      this.logError("Critical error in getPorts:", err.message, err.stack);
-      return [
-        {
-          type: "port",
-          error: `Critical error in getPorts: ${err.message}`,
-          platform: "docker",
-        },
-      ];
-    }
+          const allRunningContainers = await this._getHostNetworkContainers();
+          allRunningContainers.forEach((container) => {
+            if (container.pids && container.pids.length > 0) {
+              container.pids.forEach((pid) => {
+                dockerProcessMap.set(pid, container);
+              });
+            }
+
+            if (container.internalPorts && container.internalPorts.length > 0) {
+              container.internalPorts.forEach((internalPort) => {
+                const publishedKey = `${internalPort.host_ip}:${internalPort.host_port}`;
+                const internalKey = `${internalPort.host_ip}:${internalPort.host_port}:${container.id}:internal`;
+
+                if (!dockerPortsMap.has(publishedKey) && !dockerPortsMap.has(internalKey)) {
+                  internalPort.created = containerCreationTimeMap.get(container.id) || null;
+                  dockerPortsMap.set(internalKey, internalPort);
+                  allPorts.push(this.normalizePortEntry(internalPort));
+                }
+              });
+            }
+          });
+        } catch (dockerErr) {
+          this.logWarn("Failed to collect Docker container-specific data:", dockerErr.message);
+        }
+
+        try {
+          const systemPorts = await this._getSystemPorts();
+
+          for (const port of systemPorts) {
+            const key = `${port.host_ip}:${port.host_port}`;
+            if (dockerPortsMap.has(key)) {
+              continue;
+            }
+
+            let dockerInfo = null;
+
+            if (port.pids && port.pids.length > 0) {
+              for (const pid of port.pids) {
+                if (dockerProcessMap.has(pid)) {
+                  const container = dockerProcessMap.get(pid);
+                  dockerInfo = {
+                    containerName: container.name,
+                    containerId: container.id,
+                    target: `${container.id.substring(0, 12)}:internal(host-net)`,
+                  };
+                  port.created = containerCreationTimeMap.get(container.id) || null;
+                  break;
+                }
+              }
+            }
+
+            if (!dockerInfo) {
+              dockerInfo = await this._checkIfPortBelongsToDocker(port);
+              if (dockerInfo && dockerInfo.containerId) {
+                port.created = containerCreationTimeMap.get(dockerInfo.containerId) || null;
+              }
+            }
+
+            if (dockerInfo) {
+              const dockerPort = this.normalizePortEntry({
+                ...port,
+                source: "docker",
+                owner: dockerInfo.containerName,
+                target: dockerInfo.target,
+                container_id: dockerInfo.containerId,
+                app_id: dockerInfo.containerName,
+              });
+
+              if (!dockerPortsMap.has(key)) {
+                allPorts.push(dockerPort);
+                dockerPortsMap.set(key, dockerPort);
+              }
+            } else {
+              allPorts.push(port);
+            }
+          }
+        } catch (systemErr) {
+          this.logWarn("Failed to collect and process system ports:", systemErr.message);
+        }
+
+        this.logInfo(`Total unique ports collected: ${allPorts.length}`);
+        return allPorts;
+      } catch (err) {
+        this.logError("Critical error in getPorts:", err.message, err.stack);
+        return [
+          {
+            type: "port",
+            error: `Critical error in getPorts: ${err.message}`,
+            platform: "docker",
+          },
+        ];
+      }
+    }, { ttlMs: ttl });
   }
 
   /**
@@ -582,7 +585,7 @@ class DockerCollector extends BaseCollector {
     const isWindows = os.platform() === "win32";
 
     if (isWindows) {
-      return await this._getWindowsSystemPorts();
+  return await this._getWindowsSystemPorts();
     } else {
       return await this._getLinuxSystemPorts();
     }
@@ -674,26 +677,23 @@ class DockerCollector extends BaseCollector {
    * @private
    */
   async _getWindowsSystemPorts() {
-    try {
-      this.logInfo(
-        'Attempting to get Windows ports with "netstat -ano" command'
-      );
-      const { stdout } = await execAsync("netstat -ano");
-      return this._parseWindowsSystemOutput(stdout);
-    } catch (err) {
-      this.logWarn(
-        `Windows "netstat -ano" failed: ${err.message}. Trying "netstat -an" as fallback.`
-      );
+    const ttl = parseInt(process.env.PORT_CACHE_TTL_MS || '5000', 10);
+    return this.cacheGetOrSet('windowsSystemPorts', async () => {
       try {
-        const { stdout } = await execAsync("netstat -an");
+        this.logInfo('Attempting to get Windows ports with "netstat -ano" command');
+        const { stdout } = await execAsync("netstat -ano");
         return this._parseWindowsSystemOutput(stdout);
-      } catch (fallbackErr) {
-        this.logError(
-          `Windows "netstat -an" fallback also failed: ${fallbackErr.message}`
-        );
-        return [];
+      } catch (err) {
+        this.logWarn(`Windows "netstat -ano" failed: ${err.message}. Trying "netstat -an" as fallback.`);
+        try {
+          const { stdout } = await execAsync("netstat -an");
+          return this._parseWindowsSystemOutput(stdout);
+        } catch (fallbackErr) {
+          this.logError(`Windows "netstat -an" fallback also failed: ${fallbackErr.message}`);
+          return [];
+        }
       }
-    }
+    }, { ttlMs: ttl });
   }
 
   /**
@@ -798,51 +798,39 @@ class DockerCollector extends BaseCollector {
   _parseWindowsSystemOutput(output) {
     const entries = [];
     const lines = output.split("\n");
-
     for (let i = 4; i < lines.length; i++) {
-      const line = lines[i].trim();
+      const raw = lines[i];
+      if (!raw || !raw.includes('LISTENING')) continue;
+      const line = raw.trim();
       if (!line) continue;
-
       const cols = line.split(/\s+/);
       if (cols.length < 4) continue;
-
       const protocol = cols[0].toLowerCase();
-      if (!protocol.includes("tcp") && !protocol.includes("udp")) continue;
-
+      if (!protocol.includes('tcp') && !protocol.includes('udp')) continue;
       const localAddr = cols[1];
-      if (!localAddr || !localAddr.includes(":")) continue;
-
-      const lastColon = localAddr.lastIndexOf(":");
+      if (!localAddr || !localAddr.includes(':')) continue;
+      const lastColon = localAddr.lastIndexOf(':');
       if (lastColon === -1) continue;
-
-      const host_ip = localAddr.substring(0, lastColon);
+      let host_ip = localAddr.substring(0, lastColon);
       const portStr = localAddr.substring(lastColon + 1);
       const port = parseInt(portStr, 10);
-
-      if (isNaN(port) || port <= 0 || port > 65535) continue;
-
-      let pid = null;
-      if (cols.length > 4) {
-        const pidStr = cols[cols.length - 1];
-        const pidNum = parseInt(pidStr, 10);
-        if (!isNaN(pidNum)) pid = pidNum;
-      }
-
-      entries.push(
-        this.normalizePortEntry({
-          source: "system",
-          owner: "unknown",
-          protocol: protocol.includes("tcp") ? "tcp" : "udp",
-          host_ip: host_ip === "0.0.0.0" ? "0.0.0.0" : host_ip,
-          host_port: port,
-          target: null,
-          container_id: null,
-          app_id: null,
-          pids: pid ? [pid] : [],
-        })
-      );
+      if (Number.isNaN(port) || port <= 0 || port > 65535) continue;
+      if (host_ip === '*' || host_ip === '0.0.0.0') host_ip = '0.0.0.0';
+      const pidStr = cols[cols.length - 1];
+      const pidNum = parseInt(pidStr, 10);
+      const pid = Number.isNaN(pidNum) ? null : pidNum;
+      entries.push(this.normalizePortEntry({
+        source: 'system',
+        owner: pid ? `Process (pid ${pid})` : 'unknown',
+        protocol: protocol.includes('tcp') ? 'tcp' : 'udp',
+        host_ip,
+        host_port: port,
+        target: null,
+        container_id: null,
+        app_id: null,
+        pids: pid ? [pid] : []
+      }));
     }
-
     return entries;
   }
 
@@ -864,18 +852,29 @@ class DockerCollector extends BaseCollector {
     } catch (err) {
       this.logWarn("Could not stat /var/run/docker.sock. Is it mounted?", err.message);
     }
-
-    try {
-      await this.dockerApi.version();
-      this.logInfo(
-        "Docker command is available on the host. Assigning compatibility score (40)."
-      );
-      return 40;
-    } catch (err) {
-      this.logInfo("Docker command not found or failed.", err.message);
+    if (process.platform === 'win32') {
+      try {
+        const ver = await this.dockerApi.version();
+        if (ver && ver.Version) {
+          this.logInfo(`Docker API reachable via named pipe. Assigning compatibility score (50). Version: ${ver.Version}`);
+          return 50;
+        }
+      } catch (pipeErr) {
+        this.logInfo('Attempt to access Docker via named pipe failed.', pipeErr.message);
+      }
+    } else {
+      try {
+        const ver = await this.dockerApi.version();
+        if (ver && ver.Version) {
+          this.logInfo(`Docker API reachable (no /var/run/docker.sock). Assigning compatibility score (40). Version: ${ver.Version}`);
+          return 40;
+        }
+      } catch (verErr) {
+        this.logInfo('Docker API version call failed.', verErr.message);
+      }
     }
 
-    this.logInfo("No Docker indicators found. Incompatible (score 0).");
+    this.logInfo('No Docker indicators found. Incompatible (score 0).');
     return 0;
   }
 

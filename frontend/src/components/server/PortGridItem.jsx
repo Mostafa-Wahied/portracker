@@ -48,6 +48,9 @@ export function PortGridItem({
   onCopy,
   onNote,
   onToggleIgnore,
+  forceOpenDetails,
+  notifyOpenDetails,
+  notifyCloseDetails,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -181,7 +184,10 @@ export function PortGridItem({
                 <TooltipTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => setShowDetails(true)}
+                    onClick={() => {
+                      setShowDetails(true);
+                      if (notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+                    }}
                     className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
                   >
                     {shouldHighlight
@@ -215,7 +221,16 @@ export function PortGridItem({
           </TooltipProvider>
         )}
       </div>
-  <InternalPortDetails open={showDetails} onOpenChange={setShowDetails} containerId={port.container_id} serverId={serverId} />
+  <InternalPortDetails
+    open={forceOpenDetails || showDetails}
+    onOpenChange={(next) => {
+      if (!forceOpenDetails) setShowDetails(next);
+      if (!next && notifyCloseDetails) notifyCloseDetails();
+      if (next && notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+    }}
+    containerId={port.container_id}
+    serverId={serverId}
+  />
       <div className="flex items-center justify-between text-xs gap-2">
         <span
           className={`inline-flex items-center px-2 py-1 rounded-full font-medium flex-shrink-0 ${

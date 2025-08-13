@@ -28,7 +28,7 @@ export default function App() {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  
 
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [modalSrvId, setModalSrvId] = useState("");
@@ -129,6 +129,9 @@ export default function App() {
   });
 
   const [isSidebarOpen, setSidebarOpen] = useState(false);
+  const [deepLinkContainer, setDeepLinkContainer] = useState(null);
+  const [deepLinkServer, setDeepLinkServer] = useState(null);
+  const [appliedDeepLink, setAppliedDeepLink] = useState(false);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -508,15 +511,21 @@ export default function App() {
     }
   }, [fetchAll]);
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(fetchAll, 30000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, fetchAll]);
+  
 
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const c = params.get('container');
+      const s = params.get('server');
+      if (c) setDeepLinkContainer(c);
+      if (s) setDeepLinkServer(s);
+  } catch { void 0; }
+  }, []);
 
   useEffect(() => {
     if (!loading && groups.length > 0) {
@@ -525,10 +534,47 @@ export default function App() {
       if (!selectionIsValid) {
         setSelectedServer(groups[0].id);
       }
+      if (!appliedDeepLink && deepLinkServer && groups.some(g => g.id === deepLinkServer)) {
+        setSelectedServer(deepLinkServer);
+      }
     } else if (!loading && groups.length === 0 && selectedServer) {
       setSelectedServer(null);
     }
-  }, [groups, loading, selectedServer]);
+  }, [groups, loading, selectedServer, deepLinkServer, appliedDeepLink]);
+
+  useEffect(() => {
+    if (!appliedDeepLink && deepLinkServer && selectedServer === deepLinkServer) {
+      setAppliedDeepLink(true);
+    }
+  }, [appliedDeepLink, deepLinkServer, selectedServer]);
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (selectedServer) url.searchParams.set('server', selectedServer); else url.searchParams.delete('server');
+      if (deepLinkContainer) url.searchParams.set('container', deepLinkContainer);
+      window.history.replaceState({}, '', url.toString());
+  } catch { void 0; }
+  }, [selectedServer, deepLinkContainer]);
+
+  const handleContainerOpen = useCallback((serverId, containerId) => {
+    setDeepLinkContainer(containerId);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('container', containerId);
+      url.searchParams.set('server', serverId);
+      window.history.replaceState({}, '', url.toString());
+  } catch { void 0; }
+  }, []);
+
+  const handleContainerClose = useCallback(() => {
+    setDeepLinkContainer(null);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('container');
+      window.history.replaceState({}, '', url.toString());
+  } catch { void 0; }
+  }, []);
 
   const toggleIgnore = useCallback(
     (srvId, p) => {
@@ -892,7 +938,7 @@ export default function App() {
     const filteredServer = filterPorts(server);
 
     return (
-      <ServerSection
+  <ServerSection
         key={server.id}
         id={server.id}
         server={server.server}
@@ -969,7 +1015,10 @@ export default function App() {
         isExpanded={!!expandedServers[server.id]}
         onToggleExpanded={() => toggleServerExpanded(server.id)}
         openAccordionItems={openAccordions[server.id] ?? ["system-info", "vms"]}
-        onAccordionChange={(items) => handleAccordionChange(server.id, items)}
+  onAccordionChange={(items) => handleAccordionChange(server.id, items)}
+  deepLinkContainerId={selectedServer === server.id ? deepLinkContainer : null}
+  onOpenContainerDetails={(containerId) => handleContainerOpen(server.id, containerId)}
+  onCloseContainerDetails={handleContainerClose}
       />
     );
   }
@@ -1006,8 +1055,7 @@ export default function App() {
           groups={groups}
           loading={loading}
           onRefresh={fetchAll}
-          autoRefresh={autoRefresh}
-          setAutoRefresh={setAutoRefresh}
+          
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           searchScope={searchScope}

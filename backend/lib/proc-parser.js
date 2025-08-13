@@ -26,7 +26,7 @@ class ProcParser {
         this.logger.debug(`Using /proc path: ${this.procPath}`);
         break;
   } catch {
-    /* /proc path not accessible - will try next path */
+      ;
       }
     }
     
@@ -266,11 +266,11 @@ class ProcParser {
                 return { pid, name };
               }
             } catch {
-              /* Process directory not accessible - will try next */
+              ;
             }
           }
         } catch {
-          /* /proc/pid/fd directory not accessible */
+          ;
         }
       }
     } catch (err) {
@@ -291,7 +291,7 @@ class ProcParser {
   return match[1].substring(0, 12);
       }
     } catch {
-      /* /proc/pid/cgroup file not accessible */
+      ;
     }
     
     return null;

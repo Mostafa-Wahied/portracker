@@ -44,6 +44,9 @@ function PortCardComponent({
   onToggleIgnore,
   serverId,
   serverUrl,
+  forceOpenDetails,
+  notifyOpenDetails,
+  notifyCloseDetails,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -161,7 +164,10 @@ function PortCardComponent({
                     <TooltipTrigger asChild>
                       <button
                         type="button"
-                        onClick={() => setShowDetails(true)}
+                        onClick={() => {
+                          setShowDetails(true);
+                          if (notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+                        }}
                         className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
                       >
                         {shouldHighlight
@@ -250,7 +256,16 @@ function PortCardComponent({
           onHide={() => onToggleIgnore(serverId, port)}
         />
       </div>
-  <InternalPortDetails open={showDetails} onOpenChange={setShowDetails} containerId={port.container_id} serverId={serverId} />
+  <InternalPortDetails
+    open={forceOpenDetails || showDetails}
+    onOpenChange={(next) => {
+      if (!forceOpenDetails) setShowDetails(next);
+      if (!next && notifyCloseDetails) notifyCloseDetails();
+      if (next && notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+    }}
+    containerId={port.container_id}
+    serverId={serverId}
+  />
     </li>
   );
 }

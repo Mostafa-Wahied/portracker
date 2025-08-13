@@ -38,6 +38,29 @@ export function formatUptime(totalSeconds, short = false) {
   return uptimeString.trim() || '0m';
 }
 
+export function formatDuration(totalSeconds, { maxUnits = 3, showSeconds = false } = {}) {
+  if (totalSeconds == null || totalSeconds < 0) return '0s';
+  const units = [
+    ['d', 86400],
+    ['h', 3600],
+    ['m', 60],
+    ['s', 1]
+  ];
+  let remaining = Math.floor(totalSeconds);
+  const parts = [];
+  for (const [label, size] of units) {
+    if (label === 's' && !showSeconds && remaining < 60) break;
+    const value = Math.floor(remaining / size);
+    if (value > 0) {
+      parts.push(`${value}${label}`);
+      remaining -= value * size;
+    }
+    if (parts.length >= maxUnits) break;
+  }
+  if (!parts.length) return showSeconds ? '0s' : '0m';
+  return parts.join(' ');
+}
+
 export function formatCpuSpeed(mhz) {
   if (!mhz || mhz <= 0) return '';
   return (mhz / 1000).toFixed(2) + ' GHz';

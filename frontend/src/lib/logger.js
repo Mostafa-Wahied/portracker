@@ -27,9 +27,7 @@ class Logger {
           return false;
         }
       }
-    } catch {
-      /* No access to URLSearchParams - will check localStorage */
-    }
+    } catch { void 0; }
     
     try {
       if (typeof localStorage !== 'undefined') {
@@ -37,9 +35,7 @@ class Logger {
         if (stored === 'true') return true;
         if (stored === 'false') return false;
       }
-    } catch {
-      /* No access to localStorage - will return default */
-    }
+    } catch { void 0; }
     
   return false;
   }

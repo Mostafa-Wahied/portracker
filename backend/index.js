@@ -1,13 +1,12 @@
 /**
  * PORTS TRACKER - BACKEND SERVER
  *
- * Production-ready backend server for the portracker application.
+ * Production-ready backend server for the port tracker application.
  * Provides RESTful API endpoints for server management, port scanning,
  * and system monitoring across multiple deployment platforms.
  */
 
 const express = require('express');
-/* const bodyParser = require('body-parser'); */
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
@@ -16,12 +15,15 @@ const { Logger } = require('./lib/logger');
 const DockerAPIClient = require('./lib/docker-api');
 const { createCollector, detectCollector } = require('./collectors');
 const db = require('./db');
-/* const http = require("http"); */
 const https = require("https");
 const os = require("os");
 
 const logger = new Logger("Server", { debug: process.env.DEBUG === 'true' });
+const BASE_DEBUG = process.env.DEBUG === 'true';
 const dockerApi = new DockerAPIClient();
+const { SimpleTTLCache } = require('./utils/cache');
+const responseCache = new SimpleTTLCache();
+const RESP_TTL_PORTS = parseInt(process.env.ENDPOINT_CACHE_PORTS_TTL_MS || '3000', 10);
 
 const PING_TIMEOUT = 2000;
 
@@ -553,11 +555,20 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
 /**
- * Get all ports from local system using collector framework.
+ * Get all ports from the local system using the collector framework.
  */
 app.get("/api/ports", async (req, res) => {
   const debug = req.query.debug === "true";
-  if (debug) logger.setDebugEnabled(true);
+  if (Object.prototype.hasOwnProperty.call(req.query, 'debug')) logger.setDebugEnabled(debug);
+  const cacheKey = 'endpoint:ports:local';
+  if (!debug && process.env.DISABLE_CACHE !== 'true') {
+      const cached = responseCache.get(cacheKey);
+      if (cached) {
+        if (process.env.DEBUG === 'true') logger.debug('ports-endpoint cache hit local');
+        return res.json({ cached: true, ttlMs: RESP_TTL_PORTS, data: cached });
+      }
+      if (process.env.DEBUG === 'true') logger.debug('ports-endpoint cache miss local');
+  }
   
   logger.debug(`GET /api/ports called with debug=${debug}`);
   
@@ -591,12 +602,14 @@ app.get("/api/ports", async (req, res) => {
         return acc;
       }, {});
 
-    res.json(
-      Object.values(normalized).map((e) => ({
-        ...e,
-        owner: e.owners.join(", "),
-      }))
-    );
+    const payload = Object.values(normalized).map((e) => ({
+      ...e,
+      owner: e.owners.join(", "),
+    }));
+    if (!debug && process.env.DISABLE_CACHE !== 'true') {
+      responseCache.set(cacheKey, payload, RESP_TTL_PORTS);
+    }
+    res.json({ cached: false, ttlMs: RESP_TTL_PORTS, data: payload });
   } catch (error) {
     logger.error("Error in GET /api/ports:", error.message);
     logger.debug("Stack trace:", error.stack || "");
@@ -604,16 +617,16 @@ app.get("/api/ports", async (req, res) => {
       .status(500)
       .json({ error: "Failed to scan ports", details: error.message });
   } finally {
-    if (debug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+    if (Object.prototype.hasOwnProperty.call(req.query, 'debug')) logger.setDebugEnabled(BASE_DEBUG);
   }
 });
 
 /**
- * New peer-based endpoint to replace remote API connectivity
+ * New peer-based endpoint to replace remote API connectivity.
  */
 app.get("/api/all-ports", async (req, res) => {
   const debug = req.query.debug === "true";
-  if (debug) logger.setDebugEnabled(true);
+  if (Object.prototype.hasOwnProperty.call(req.query, 'debug')) logger.setDebugEnabled(debug);
   
   logger.debug(`GET /api/all-ports called with debug=${debug}`);
   
@@ -651,7 +664,7 @@ app.get("/api/all-ports", async (req, res) => {
       .status(500)
       .json({ error: "Failed to process all ports", details: error.message });
   } finally {
-    if (debug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+    if (Object.prototype.hasOwnProperty.call(req.query, 'debug')) logger.setDebugEnabled(BASE_DEBUG);
   }
 });
 
@@ -688,7 +701,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
   const serverId = req.params.id;
   const currentDebug = req.query.debug === "true";
   
-  if (currentDebug) logger.setDebugEnabled(true);
+  if (Object.prototype.hasOwnProperty.call(req.query, 'debug')) logger.setDebugEnabled(currentDebug);
   
   logger.debug(`GET /api/servers/${serverId}/scan called with debug=${currentDebug}`);
 
@@ -774,9 +787,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
             let errorBody = "Peer responded with an error.";
             try {
               errorBody = await peerResponse.text();
-            } catch {
-              /* Failed to read error response body - will log generic error */
-            }
+            } catch { void 0; }
             logger.warn(
               `[GET /api/servers/${serverId}/scan] Peer server at ${server.url} responded with status ${peerResponse.status}. Body: ${errorBody}`
             );
@@ -834,8 +845,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
       .status(500)
       .json({ error: "Failed to scan server", details: error.message });
   } finally {
-
-    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+    if (Object.prototype.hasOwnProperty.call(req.query, 'debug')) logger.setDebugEnabled(BASE_DEBUG);
   }
 });
 
@@ -1347,7 +1357,7 @@ app.get("/api/ping", async (req, res) => {
     try {
       await dockerApi._ensureConnected?.();
     } catch {
-      /* Docker connection failed - will continue with unknown health status */
+      void 0;
     }
     const health = await (dockerApi.getContainerHealth ? dockerApi.getContainerHealth(container_id) : Promise.resolve({ status: 'unknown', health: 'unknown' }));
 
@@ -1475,7 +1485,6 @@ app.get("/api/ping", async (req, res) => {
 app.get("/api/health", (req, res) => {
   logger.debug("Health check requested");
   try {
-    /* Test database connectivity */
     db.prepare("SELECT 1").get();
     const memoryUsage = process.memoryUsage();
     const uptime = process.uptime();
@@ -1503,6 +1512,10 @@ app.get("/api/containers/:id/details", async (req, res) => {
   const containerId = req.params.id;
   const currentDebug = req.query.debug === 'true';
   const serverId = req.query.server_id;
+  const includeRaw = req.query.raw === 'true';
+  const includeSize = req.query.size === 'true';
+  const includeStats = req.query.stats === 'true';
+  const exportJson = req.query.export === 'true';
 
   if (!containerId) {
     return res.status(400).json({ error: 'container id is required' });
@@ -1518,7 +1531,9 @@ app.get("/api/containers/:id/details", async (req, res) => {
           return res.status(400).json({ error: 'server url not found for remote details' });
         }
         const base = row.url.replace(/\/$/, '');
-        const url = `${base}/api/containers/${encodeURIComponent(containerId)}/details`;
+  const forwardable = ['raw','size','stats','export','debug'];
+  const qsFlags = forwardable.filter(f => req.query[f] === 'true').map(f => `${f}=true`);
+  const url = `${base}/api/containers/${encodeURIComponent(containerId)}/details${qsFlags.length ? '?' + qsFlags.join('&') : ''}`;
   const remoteResp = await fetch(url, { method: 'GET', headers: { 'accept': 'application/json' } });
         const text = await remoteResp.text();
         let body;
@@ -1531,12 +1546,29 @@ app.get("/api/containers/:id/details", async (req, res) => {
       }
     }
 
-    await dockerApi._ensureConnected?.();
-    const insp = await dockerApi.inspectContainer(containerId);
-    const health = await dockerApi.getContainerHealth(containerId);
+  await dockerApi._ensureConnected?.();
+  const insp = await dockerApi.inspectContainer(containerId, { size: includeSize });
+  const health = await dockerApi.getContainerHealth(containerId);
+  let stats = null;
+  let statsUnavailableReason = null;
+  if (includeStats) {
+    if (insp.State?.Status && insp.State.Status !== 'running') {
+      statsUnavailableReason = `container_not_running:${insp.State.Status}`;
+    } else {
+      const rawStats = await dockerApi.getContainerStats(containerId);
+      if (rawStats && !rawStats.error) {
+        stats = rawStats;
+      } else if (rawStats && rawStats.error) {
+        statsUnavailableReason = `stats_error:${rawStats.error}`;
+      } else {
+        statsUnavailableReason = 'docker_returned_null';
+      }
+    }
+  }
 
     const portsObj = insp.NetworkSettings?.Ports || {};
     const portMappings = [];
+    const exposedUnmapped = [];
     for (const [containerPort, hostBindings] of Object.entries(portsObj)) {
       if (hostBindings && Array.isArray(hostBindings) && hostBindings.length) {
         for (const hb of hostBindings) {
@@ -1549,15 +1581,29 @@ app.get("/api/containers/:id/details", async (req, res) => {
         }
       } else {
         const [p, proto] = containerPort.split('/');
-        portMappings.push({
+        const portNum = parseInt(p, 10);
+        const entry = {
           host_ip: '0.0.0.0',
-          host_port: parseInt(p, 10),
-          container_port: parseInt(p, 10),
+          host_port: portNum,
+          container_port: portNum,
           protocol: proto || 'tcp',
           internal: true
-        });
+        };
+        portMappings.push(entry);
+        exposedUnmapped.push({ port: portNum, protocol: proto || 'tcp' });
       }
     }
+
+  const rawRestartPolicy = insp.HostConfig?.RestartPolicy?.Name;
+  const normalizedRestartPolicy = rawRestartPolicy && rawRestartPolicy !== '' ? rawRestartPolicy : 'none';
+    const startedAt = insp.State?.StartedAt;
+    const uptimeSeconds = (() => {
+      if (!startedAt || !insp.State?.Running) return null;
+      const start = Date.parse(startedAt);
+      if (Number.isNaN(start)) return null;
+      return Math.max(0, Math.floor((Date.now() - start) / 1000));
+    })();
+  const ephemeral = normalizedRestartPolicy === 'none' && (uptimeSeconds != null) && uptimeSeconds < 300;
 
     const response = {
       id: insp.Id?.substring(0, 12) || containerId,
@@ -1565,15 +1611,42 @@ app.get("/api/containers/:id/details", async (req, res) => {
       image: insp.Config?.Image,
       command: Array.isArray(insp.Config?.Cmd) ? insp.Config.Cmd.join(' ') : insp.Config?.Cmd,
       created: Math.floor(new Date(insp.Created).getTime() / 1000) || null,
+      createdISO: insp.Created || null,
       state: insp.State?.Status,
       health: health.health || 'unknown',
-      restartCount: insp.RestartCount || 0,
+      restartCount: typeof insp.RestartCount === 'number' ? insp.RestartCount : 0,
+      restartPolicy: normalizedRestartPolicy,
+      restartPolicyRaw: rawRestartPolicy ?? null,
+      restartRetries: insp.HostConfig?.RestartPolicy?.MaximumRetryCount ?? null,
       networkMode: insp.HostConfig?.NetworkMode || '',
       ports: portMappings,
+      exposedUnmapped,
       labels: insp.Config?.Labels || {},
-      mounts: (insp.Mounts || []).map(m => ({ type: m.Type, source: m.Source, destination: m.Destination }))
+      mounts: (insp.Mounts || []).map(m => ({ type: m.Type, source: m.Source, destination: m.Destination })),
+      networks: Object.entries(insp.NetworkSettings?.Networks || {}).map(([name, n]) => ({
+        name,
+        ip: n.IPAddress || null,
+        gateway: n.Gateway || null,
+        mac: n.MacAddress || null,
+        driver: n.Driver || null
+      })),
+      imageDigest: Array.isArray(insp.RepoDigests) && insp.RepoDigests.length ? insp.RepoDigests[0] : null,
+      uptimeSeconds,
+      ephemeral,
+      sizeRwBytes: includeSize ? insp.SizeRw ?? null : undefined,
+      sizeRootFsBytes: includeSize ? insp.SizeRootFs ?? null : undefined,
+  stats,
+  statsUnavailableReason,
+      statsSampledAt: stats?.read || null,
+      exportedAt: exportJson ? new Date().toISOString() : undefined
     };
-
+    if (includeRaw) {
+      response.raw = insp;
+    }
+    if (exportJson) {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename=container-${response.id}-details.json`);
+    }
     return res.json(response);
   } catch (err) {
     logger.error(`GET /api/containers/${containerId}/details failed:`, err.message);

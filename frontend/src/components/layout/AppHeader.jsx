@@ -12,14 +12,11 @@ import {
 import { RefreshCw, Loader2, Search, X, Sun, Moon, Menu, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RefreshProgress } from "../ui/RefreshProgress";
 import Logo from "@/components/Logo";
 
 export function AppHeader({
   loading,
-  autoRefresh,
   onRefresh,
-  setAutoRefresh,
   searchTerm,
   onSearchChange,
   searchScope,
@@ -234,27 +231,7 @@ export function AppHeader({
 
           <div className="h-6 border-l border-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <label className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={autoRefresh}
-                  onChange={(e) => setAutoRefresh(e.target.checked)}
-                  className="sr-only peer"
-                />
-                <div
-                  className={`relative w-9 h-5 rounded-full peer peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white ${
-                    autoRefresh
-                      ? "bg-indigo-600 dark:bg-indigo-600"
-                      : "bg-gray-200 dark:bg-gray-600"
-                  }`}
-                ></div>
-                <span>Auto-refresh</span>
-              </label>
-            </TooltipTrigger>
-            <TooltipContent>Toggle auto-refresh</TooltipContent>
-          </Tooltip>
+          
 
           <Tooltip>
             <TooltipTrigger asChild>
@@ -293,11 +270,7 @@ export function AppHeader({
         </div>
       </div>
 
-      {autoRefresh && (
-        <div className="absolute bottom-0 left-0 right-0">
-          <RefreshProgress active={autoRefresh} duration={30000} />
-        </div>
-      )}
+      
     </header>
   );
 }

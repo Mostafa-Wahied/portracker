@@ -32,69 +32,72 @@ class SystemCollector extends BaseCollector {
    * @returns {Promise<Object>} System information
    */
   async getSystemInfo() {
-    try {
-      this.log("Collecting system info");
-      const hostname = os.hostname();
-      const platform = os.platform();
-      const release = os.release();
-      const type = os.type();
-      const arch = os.arch();
-      const cpus = os.cpus();
-      const totalMem = os.totalmem();
-      const freeMem = os.freemem();
-      const uptime = os.uptime();
-
-      let version = release;
+    const ttl = parseInt(process.env.SYSTEM_CACHE_SYSTEMINFO_TTL_MS || '15000', 10);
+    return this.cacheGetOrSet('systemInfo', async () => {
       try {
-        if (!this.isWindows) {
-          const { stdout } = await execAsync("uname -r");
-          version = stdout.trim();
-        } else {
-          const { stdout } = await execAsync("ver");
-          version = stdout.trim();
-        }
-      } catch (err) {
-        this.logWarn("Could not get detailed OS version info:", err.message);
-      }
+        this.log("Collecting system info");
+        const hostname = os.hostname();
+        const platform = os.platform();
+        const release = os.release();
+        const type = os.type();
+        const arch = os.arch();
+        const cpus = os.cpus();
+        const totalMem = os.totalmem();
+        const freeMem = os.freemem();
+        const uptime = os.uptime();
 
-      return {
-        type: "system",
-        hostname,
-        version,
-        platform: "system",
-        os: {
-          platform,
-          release,
-          type,
-          arch,
-        },
-        cpu: {
-          model: cpus.length > 0 ? cpus[0].model : "Unknown",
-          cores: cpus.length,
-          speed: cpus.length > 0 ? cpus[0].speed : 0,
-        },
-        memory: {
-          total: totalMem,
-          free: freeMem,
-          usage: Math.round(((totalMem - freeMem) / totalMem) * 100),
-        },
-        uptime,
-        platform_data: {
-          description: `${type} ${release} (${arch})`,
-          uptime_days: Math.floor(uptime / 86400),
-          memory_gb: Math.round(totalMem / (1024 * 1024 * 1024)),
-        },
-      };
-    } catch (err) {
-      this.logError("Error collecting system info:", err.message, err.stack);
-      return {
-        type: "system",
-        hostname: os.hostname() || "Unknown system",
-        version: "unknown",
-        platform: "system",
-        error: err.message,
-      };
-    }
+        let version = release;
+        try {
+          if (!this.isWindows) {
+            const { stdout } = await execAsync("uname -r");
+            version = stdout.trim();
+          } else {
+            const { stdout } = await execAsync("ver");
+            version = stdout.trim();
+          }
+        } catch (err) {
+          this.logWarn("Could not get detailed OS version info:", err.message);
+        }
+
+        return {
+          type: "system",
+          hostname,
+          version,
+          platform: "system",
+          os: {
+            platform,
+            release,
+            type,
+            arch,
+          },
+          cpu: {
+            model: cpus.length > 0 ? cpus[0].model : "Unknown",
+            cores: cpus.length,
+            speed: cpus.length > 0 ? cpus[0].speed : 0,
+          },
+          memory: {
+            total: totalMem,
+            free: freeMem,
+            usage: Math.round(((totalMem - freeMem) / totalMem) * 100),
+          },
+          uptime,
+          platform_data: {
+            description: `${type} ${release} (${arch})`,
+            uptime_days: Math.floor(uptime / 86400),
+            memory_gb: Math.round(totalMem / (1024 * 1024 * 1024)),
+          },
+        };
+      } catch (err) {
+        this.logError("Error collecting system info:", err.message, err.stack);
+        return {
+          type: "system",
+          hostname: os.hostname() || "Unknown system",
+          version: "unknown",
+          platform: "system",
+          error: err.message,
+        };
+      }
+    }, { ttlMs: ttl });
   }
 
   /**
@@ -146,66 +149,64 @@ class SystemCollector extends BaseCollector {
    * @returns {Promise<Array>} List of port entries
    */
   async getPorts() {
-    try {
-      this.log("Collecting system ports");
-      
-  
-      if (!this.isWindows && this.procParser) {
-        try {
-          this.log("Testing /proc filesystem access effectiveness...");
-          const procWorks = await this.procParser.testProcAccess();
-          
-          if (procWorks) {
-            this.log("Attempting to get ports via /proc filesystem");
-            const tcpPorts = await this.procParser.getTcpPorts();
-            
-            
-            const includeAllUdp = process.env.INCLUDE_UDP === 'true';
-            const udpPorts = await this.procParser.getUdpPorts(includeAllUdp);
-            
-            const allPorts = [...tcpPorts, ...udpPorts];
-            
-            if (allPorts.length >= 3) {
-              this.log(`Successfully collected ${allPorts.length} ports via /proc (TCP: ${tcpPorts.length}, UDP: ${udpPorts.length})`);
-              return allPorts.map(port => this.normalizePortEntry({
-                source: "system",
-                owner: port.owner,
-                protocol: port.protocol,
-                host_ip: port.host_ip,
-                host_port: port.host_port,
-                pid: port.pid,
-                platform_data: {
-                  process: port.owner,
+    const ttl = parseInt(process.env.SYSTEM_CACHE_PORTS_TTL_MS || '5000', 10);
+    return this.cacheGetOrSet('ports', async () => {
+      try {
+        this.log("Collecting system ports");
+
+        if (!this.isWindows && this.procParser) {
+          try {
+            this.log("Testing /proc filesystem access effectiveness...");
+            const procWorks = await this.procParser.testProcAccess();
+
+            if (procWorks) {
+              this.log("Attempting to get ports via /proc filesystem");
+              const tcpPorts = await this.procParser.getTcpPorts();
+              const includeAllUdp = process.env.INCLUDE_UDP === 'true';
+              const udpPorts = await this.procParser.getUdpPorts(includeAllUdp);
+              const allPorts = [...tcpPorts, ...udpPorts];
+
+              if (allPorts.length >= 3) {
+                this.log(`Successfully collected ${allPorts.length} ports via /proc (TCP: ${tcpPorts.length}, UDP: ${udpPorts.length})`);
+                return allPorts.map(port => this.normalizePortEntry({
+                  source: "system",
+                  owner: port.owner,
+                  protocol: port.protocol,
+                  host_ip: port.host_ip,
+                  host_port: port.host_port,
                   pid: port.pid,
-                },
-              }));
+                  platform_data: {
+                    process: port.owner,
+                    pid: port.pid,
+                  },
+                }));
+              } else {
+                this.logWarn(`/proc parsing returned only ${allPorts.length} ports, falling back to commands`);
+              }
             } else {
-              this.logWarn(`/proc parsing returned only ${allPorts.length} ports, falling back to commands`);
+              this.logWarn("/proc access test failed, falling back to commands");
             }
-          } else {
-            this.logWarn("/proc access test failed, falling back to commands");
+          } catch (procErr) {
+            this.logWarn("Failed to get ports via /proc, falling back to commands:", procErr.message);
           }
-        } catch (procErr) {
-          this.logWarn("Failed to get ports via /proc, falling back to commands:", procErr.message);
         }
+
+        if (this.isWindows) {
+          return await this.getWindowsPorts();
+        } else {
+          return await this.getLinuxPorts();
+        }
+      } catch (err) {
+        this.logError("Error collecting system ports:", err.message, err.stack);
+        return [
+          {
+            type: "port",
+            error: err.message,
+            platform: "system",
+          },
+        ];
       }
-      
-  
-      if (this.isWindows) {
-        return await this.getWindowsPorts();
-      } else {
-        return await this.getLinuxPorts();
-      }
-    } catch (err) {
-      this.logError("Error collecting system ports:", err.message, err.stack);
-      return [
-        {
-          type: "port",
-          error: err.message,
-          platform: "system",
-        },
-      ];
-    }
+    }, { ttlMs: ttl });
   }
 
   /**

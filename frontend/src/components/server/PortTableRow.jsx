@@ -43,6 +43,9 @@ function PortTableRowComponent({
   onCopy,
   onNote,
   onToggleIgnore,
+  forceOpenDetails,
+  notifyOpenDetails,
+  notifyCloseDetails,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -257,10 +260,14 @@ function PortTableRowComponent({
       </td>
 
       <InternalPortDetails
-        open={showDetails}
-        onOpenChange={setShowDetails}
-  containerId={port.container_id}
-  serverId={serverId}
+        open={forceOpenDetails || showDetails}
+        onOpenChange={(next) => {
+          if (!forceOpenDetails) setShowDetails(next);
+          if (!next && notifyCloseDetails) notifyCloseDetails();
+          if (next && notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+        }}
+        containerId={port.container_id}
+        serverId={serverId}
       />
     </tr>
   );
