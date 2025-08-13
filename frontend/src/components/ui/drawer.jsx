@@ -13,10 +13,11 @@ const DrawerContent = React.forwardRef(({ className, children, ...props }, ref) 
   <div
     ref={ref}
     className={cn(
-      "fixed inset-y-0 right-0 z-50 h-full w-full border-l bg-background p-6 shadow-lg sm:max-w-sm",
-      "transform translate3d(100%, 0, 0)",
-      "data-[state=open]:animate-[slideInRight_250ms_ease-out_forwards]",
-      "data-[state=closed]:animate-[slideOutRight_250ms_ease-in_forwards]",
+      "fixed inset-y-0 right-0 z-50 h-full w-full border-l bg-background p-6 sm:max-w-sm",
+      "transform translate3d(100%,0,0)",
+      "data-[state=open]:animate-[slideInRight_200ms_cubic-bezier(.4,0,.2,1)_forwards]",
+      "data-[state=closed]:animate-[slideOutRight_200ms_cubic-bezier(.4,0,.2,1)_forwards]",
+      "motion-safe:shadow-lg motion-reduce:shadow-none",
       className
     )}
     style={{

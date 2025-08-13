@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState, useCallback, startTransition } from "react";
+import React, { useEffect, useRef, useState, useCallback, startTransition } from "react";
 import { createPortal } from 'react-dom';
 import {
   DrawerContent,
@@ -28,7 +28,6 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [, forceTick] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
-  const [isAnimating, setIsAnimating] = useState(false);
   const cmdRef = useRef(null);
   const drawerRef = useRef(null);
   const previouslyFocusedRef = useRef(null);
@@ -41,6 +40,7 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   const [statsError, setStatsError] = useState(null);
   const [statsAttempted, setStatsAttempted] = useState(false);
   const [statsUnavailableReason, setStatsUnavailableReason] = useState(null);
+  const [contentMounted] = useState(true);
 
   const guessShell = (image) => {
     const img = (image || "").toLowerCase();
@@ -60,42 +60,23 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   
   useEffect(() => {
     if (!open || !containerId) return;
-    if (isAnimating) return;
-    
-    const ANIMATION_COMPLETE_DELAY = 300;
-    const fetchTimeout = setTimeout(() => {
-      const controller = new AbortController();
-      setLoading(true);
-      setError(null);
-      const qs = serverId ? `?server_id=${encodeURIComponent(serverId)}` : "";
-      
-      fetch(`/api/containers/${encodeURIComponent(containerId)}/details${qs}`, { 
-        signal: controller.signal,
-        priority: 'high'
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    const qs = serverId ? `?server_id=${encodeURIComponent(serverId)}` : "";
+    fetch(`/api/containers/${encodeURIComponent(containerId)}/details${qs}`, { signal: controller.signal, priority: 'high' })
+      .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then((json) => {
+        startTransition(() => {
+          setData(json);
+          try { setShell((prev) => prev || guessShell(json.image)); } catch { setShell('/bin/sh'); }
+        });
       })
-        .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
-        .then((json) => {
-          startTransition(() => {
-            setData(json);
-            try {
-              setShell((prev) => prev || guessShell(json.image));
-            } catch {
-              setShell('/bin/sh');
-            }
-          });
-        })
-        .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
-        .finally(() => setLoading(false));
-      
-      drawerRef.current && (drawerRef.current._detailsAbort = controller);
-    }, ANIMATION_COMPLETE_DELAY);
-    
-    return () => {
-      clearTimeout(fetchTimeout);
-      const ctl = drawerRef.current?._detailsAbort;
-      if (ctl) ctl.abort();
-    };
-  }, [open, containerId, serverId, isAnimating]);
+      .catch((e) => { if (e.name !== 'AbortError') setError(e.message); })
+      .finally(() => setLoading(false));
+    drawerRef.current && (drawerRef.current._detailsAbort = controller);
+    return () => { controller.abort(); };
+  }, [open, containerId, serverId]);
 
   const execTarget = data?.name || data?.id || containerId;
   const execCmd = `docker exec -it ${execTarget} ${shell}`;
@@ -115,66 +96,27 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
       .catch(e => setRawState({ loading: false, error: e.message, data: null }));
   };
 
-  useLayoutEffect(() => {
-    if (drawerRef.current) {
-      const drawer = drawerRef.current;
-      drawer.style.transform = 'translate3d(100%, 0, 0)';
-      drawer.style.willChange = 'transform';
-      drawer.style.backfaceVisibility = 'hidden';
-    }
-  }, [isVisible]);
+  
 
   useEffect(() => {
     if (open) {
       document.body.style.overflowY = 'hidden';
       setIsVisible(true);
-      setIsAnimating(true);
       previouslyFocusedRef.current = document.activeElement;
-      
-      requestAnimationFrame(() => {
-        if (drawerRef.current) {
-          drawerRef.current.style.transform = '';
-        }
-        drawerRef.current?.querySelector('[data-autofocus]')?.focus();
-      });
-      
-      if (announceRef.current) {
-        announceRef.current.textContent = 'Container details panel opened';
-      }
-      
-      const ANIMATION_DURATION = 250;
-      setTimeout(() => {
-        setIsAnimating(false);
-        if (drawerRef.current) {
-          drawerRef.current.style.willChange = 'auto';
-        }
-      }, ANIMATION_DURATION);
+      announceRef.current && (announceRef.current.textContent = 'Container details panel opened');
+      queueMicrotask(() => drawerRef.current?.querySelector('[data-autofocus]')?.focus());
     } else if (!open && previouslyFocusedRef.current) {
-      setIsAnimating(true);
-      if (drawerRef.current) {
-        drawerRef.current.style.willChange = 'transform';
-      }
-      
-      const ANIMATION_DURATION = 250;
-      
-      setTimeout(() => {
+  setTimeout(() => {
         setIsVisible(false);
-        setIsAnimating(false);
         document.body.style.overflowY = '';
-        if (drawerRef.current) {
-          drawerRef.current.style.willChange = 'auto';
-        }
-      }, ANIMATION_DURATION);
-      
-      try { previouslyFocusedRef.current.focus(); } catch { void 0; }
-      if (announceRef.current) {
-        announceRef.current.textContent = 'Container details panel closed';
-      }
+  try { previouslyFocusedRef.current.focus(); } catch { void 0; }
+        announceRef.current && (announceRef.current.textContent = 'Container details panel closed');
+      }, 250);
     }
   }, [open]);
 
   const refreshStats = useCallback((initial=false) => {
-    if (!open || !containerId || isAnimating) return;
+    if (!open || !containerId) return;
     
     if (statsAbortRef.current) statsAbortRef.current.abort();
     const controller = new AbortController();
@@ -201,7 +143,7 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
       })
       .catch(e => { if (e.name !== 'AbortError') setStatsError(e.message || 'Failed to load stats'); })
       .finally(() => setStatsLoading(false));
-  }, [open, containerId, serverId, isAnimating]);
+  }, [open, containerId, serverId]);
 
   useEffect(() => {
     if (open && containerId && data && !data.stats && !statsAttempted && !statsLoading && !statsError) {
@@ -212,29 +154,12 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   
   useEffect(() => {
     if (!open) return;
-    if (isAnimating) return;
-    
-    const ANIMATION_COMPLETE_DELAY = 300;
-    let intervalId = null;
-    
-    const startTimeout = setTimeout(() => {
-      intervalId = setInterval(() => {
-        if (!document.hidden) {
-          startTransition(() => forceTick(t => t + 1));
-        }
-      }, 1000);
-      if (drawerRef.current) {
-        drawerRef.current._tickInterval = intervalId;
-      }
-    }, ANIMATION_COMPLETE_DELAY);
-    
-    return () => {
-      clearTimeout(startTimeout);
-      if (intervalId) clearInterval(intervalId);
-      const intId = drawerRef.current?._tickInterval;
-      if (intId) clearInterval(intId);
-    };
-  }, [open, isAnimating]);
+    let intervalId = setInterval(() => {
+      if (!document.hidden) startTransition(() => forceTick(t => t + 1));
+    }, 1000);
+    drawerRef.current && (drawerRef.current._tickInterval = intervalId);
+    return () => { clearInterval(intervalId); };
+  }, [open]);
 
   useEffect(() => {
     if (copiedKey && liveRegionRef.current) {
@@ -282,7 +207,6 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
         ref={drawerRef}
         data-state={open ? "open" : "closed"}
         className="flex flex-col h-full outline-none sm:max-w-lg md:max-w-xl lg:max-w-2xl w-full"
-        data-animation-ready="true"
       >
         <DrawerClose onClick={() => onOpenChange(false)} data-autofocus />
   <DrawerHeader className="pb-3 pr-10 border-b border-slate-200 dark:border-slate-800">
@@ -297,9 +221,16 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
         </DrawerHeader>
 
   <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-8 py-4" aria-describedby="container-details-help">
-          <div ref={liveRegionRef} aria-live="polite" className="sr-only" />
-          <div ref={announceRef} aria-live="polite" className="sr-only" />
-          <p id="container-details-help" className="sr-only">Use Tab to move, Escape to close. Copy buttons announce success. Sections are collapsible.</p>
+          {!contentMounted && (
+            <div className="animate-pulse text-xs text-slate-500 px-1">Preparing details...</div>
+          )}
+          {contentMounted && (
+            <>
+              <div ref={liveRegionRef} aria-live="polite" className="sr-only" />
+              <div ref={announceRef} aria-live="polite" className="sr-only" />
+              <p id="container-details-help" className="sr-only">Use Tab to move, Escape to close. Copy buttons announce success. Sections are collapsible.</p>
+            </>
+          )}
           
           {loading && (
             <div className="flex items-center gap-2 text-sm text-slate-500 px-1">
@@ -317,7 +248,7 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
             </div>
           )}
           
-          {data && (
+          {contentMounted && data && (
             <div className="space-y-8 px-1">
               <section className="space-y-6">
                     <div role="group" aria-labelledby="identity-section-heading">
