@@ -2,6 +2,7 @@ const Docker = require('dockerode');
 const fs = require('fs');
 const path = require('path');
 const { Logger } = require('./logger');
+const { SimpleTTLCache } = require('../utils/cache');
 
 class DockerAPIClient {
   constructor(options = {}) {
@@ -9,6 +10,13 @@ class DockerAPIClient {
     this.docker = this._initializeDocker(options);
     this.isConnected = false;
     this.deploymentPattern = null;
+    this.cache = new SimpleTTLCache();
+    this.ttl = {
+      containers: parseInt(process.env.DOCKER_CACHE_CONTAINERS_TTL_MS || '4000', 10),
+      inspect: parseInt(process.env.DOCKER_CACHE_INSPECT_TTL_MS || '5000', 10),
+      stats: parseInt(process.env.DOCKER_CACHE_STATS_TTL_MS || '1500', 10)
+    };
+  this.cacheCounters = { containers:{hits:0,misses:0}, inspect:{hits:0,misses:0}, stats:{hits:0,misses:0}, ops:0, lastSummary:0 };
   }
 
   _initializeDocker(options) {
@@ -17,26 +25,39 @@ class DockerAPIClient {
     const tlsVerify = options.tlsVerify ?? (process.env.DOCKER_TLS_VERIFY === '1');
     const certPath = options.certPath ?? process.env.DOCKER_CERT_PATH;
 
-    // 1) Unix domain socket (default and unix://)
-    if (!dockerHost || dockerHost.startsWith('unix://')) {
+  
+    if (dockerHost?.startsWith('unix://')) {
       this.deploymentPattern = 'socket';
-      const socketPath = dockerHost?.replace(/^unix:\/\//, '') || defaultSocket;
+      const socketPath = dockerHost.replace(/^unix:\/\//, '');
       return new Docker({ socketPath });
     }
 
-    // 2) Windows named pipe
-    if (dockerHost.startsWith('npipe://')) {
+  
+    if (dockerHost?.startsWith('npipe://')) {
       this.deploymentPattern = 'npipe';
-      return new Docker({ socketPath: dockerHost });
+      const npipePath = dockerHost.replace(/^npipe:\/\//, '');
+      return new Docker({ socketPath: npipePath });
     }
 
-    // 3) TCP/HTTP(S)
+  
+    if (!dockerHost) {
+      if (process.platform === 'win32') {
+  
+        this.deploymentPattern = 'npipe';
+        return new Docker({ socketPath: '//./pipe/docker_engine' });
+      }
+  
+      this.deploymentPattern = 'socket';
+      return new Docker({ socketPath: defaultSocket });
+    }
+
+  
     const urlStr = dockerHost.replace(/^tcp:\/\//, 'http://');
     const u = new URL(urlStr);
     const dockerOpts = {
       host: u.hostname,
       port: u.port ? Number(u.port) : (tlsVerify ? 2376 : 2375),
-      protocol: (u.protocol || 'http:').slice(0, -1) // 'http' | 'https'
+  protocol: (u.protocol || 'http:').slice(0, -1)
     };
 
     if (tlsVerify && certPath) {
@@ -69,6 +90,21 @@ class DockerAPIClient {
     }
   }
 
+  /**
+   * Retrieve low-level Docker version info (wrapper used by detection logic)
+   * Provides backward compatibility where code expected dockerApi.version().
+   * @returns {Promise<Object>} version information
+   */
+  async version() {
+    await this._ensureConnected();
+    try {
+      return await this.docker.version();
+    } catch (error) {
+      this.logger.error('version() call failed', { err: error });
+      throw error;
+    }
+  }
+
   async _ensureConnected() {
     if (!this.isConnected) {
       this.logger.debug('Docker API not connected, attempting to connect...');
@@ -82,43 +118,111 @@ class DockerAPIClient {
 
   async listContainers(options = {}) {
     await this._ensureConnected();
+    const key = `containers:${options.all?'all':'running'}:${JSON.stringify(options.filters||{})}`;
+    const cached = this.cache.get(key);
+    if (cached) {
+      this.cacheCounters.containers.hits++;
+      this.cacheCounters.ops++;
+      if (process.env.CACHE_DEBUG_VERBOSE === 'true') this.logger.debug(`cache hit ${key}`);
+      this._maybeLogCacheSummary();
+      return cached;
+    }
+    this.cacheCounters.containers.misses++;
+    this.cacheCounters.ops++;
+    if (process.env.CACHE_DEBUG_VERBOSE === 'true') this.logger.debug(`cache miss ${key}`);
+    this._maybeLogCacheSummary();
+    return await this.cache.getOrSet(key, this.ttl.containers, async () => {
+      try {
+        const containers = await this.docker.listContainers({
+          all: options.all || false,
+          filters: options.filters || {}
+        });
+        return containers.map(container => ({
+          ID: container.Id.substring(0, 12),
+          Names: container.Names.map(name => name.replace(/^\//, '')).join(','),
+          Image: container.Image,
+          Command: container.Command,
+          Created: container.Created,
+          Status: container.Status,
+          State: container.State,
+          Ports: this._formatPorts(container.Ports),
+          Labels: container.Labels,
+          NetworkSettings: container.NetworkSettings,
+          Mounts: container.Mounts,
+          HostConfig: container.HostConfig
+        }));
+      } catch (error) {
+        this.logger.error('listContainers failed:', error.message);
+        throw error;
+      }
+    });
+  }
 
+  async inspectContainer(containerId, options = {}) {
+    await this._ensureConnected();
+    const useSize = options.size === true;
+    const cacheKey = useSize ? null : `inspect:${containerId}`;
+    if (!useSize) {
+      const cached = this.cache.get(cacheKey);
+      if (cached) {
+        this.cacheCounters.inspect.hits++;
+        this.cacheCounters.ops++;
+        if (process.env.CACHE_DEBUG_VERBOSE === 'true') this.logger.debug(`cache hit ${cacheKey}`);
+        this._maybeLogCacheSummary();
+        return cached;
+      }
+      this.cacheCounters.inspect.misses++;
+      this.cacheCounters.ops++;
+      if (process.env.CACHE_DEBUG_VERBOSE === 'true') this.logger.debug(`cache miss ${cacheKey}`);
+      this._maybeLogCacheSummary();
+    }
     try {
-      const containers = await this.docker.listContainers({
-        all: options.all || false,
-        filters: options.filters || {}
-      });
-
-      return containers.map(container => ({
-        ID: container.Id.substring(0, 12),
-        Names: container.Names.map(name => name.replace(/^\//, '')).join(','),
-        Image: container.Image,
-        Command: container.Command,
-        Created: container.Created,
-        Status: container.Status,
-        State: container.State,
-        Ports: this._formatPorts(container.Ports),
-        // Include other container properties but don't override our processed fields
-        Labels: container.Labels,
-        NetworkSettings: container.NetworkSettings,
-        Mounts: container.Mounts,
-        HostConfig: container.HostConfig
-      }));
+      const container = this.docker.getContainer(containerId);
+      const insp = await container.inspect({ size: useSize });
+      if (!useSize) this.cache.set(cacheKey, insp, this.ttl.inspect);
+      return insp;
     } catch (error) {
-      this.logger.error('listContainers failed:', error.message);
+      this.logger.error(`inspectContainer failed for ${containerId}:`, error.message);
       throw error;
     }
   }
 
-  async inspectContainer(containerId) {
+  async getContainerStats(containerId) {
     await this._ensureConnected();
-
+    const key = `stats:${containerId}`;
+    const cached = this.cache.get(key);
+    if (cached) {
+      this.cacheCounters.stats.hits++;
+      this.cacheCounters.ops++;
+      if (process.env.CACHE_DEBUG_VERBOSE === 'true') this.logger.debug(`cache hit ${key}`);
+      this._maybeLogCacheSummary();
+      return cached;
+    }
+    this.cacheCounters.stats.misses++;
+    this.cacheCounters.ops++;
+    if (process.env.CACHE_DEBUG_VERBOSE === 'true') this.logger.debug(`cache miss ${key}`);
+    this._maybeLogCacheSummary();
     try {
       const container = this.docker.getContainer(containerId);
-      return await container.inspect();
+      const stats = await container.stats({ stream: false });
+      if (!stats) return null;
+      let cpuPercent = null;
+      try {
+        const cpuDelta = (stats.cpu_stats?.cpu_usage?.total_usage || 0) - (stats.precpu_stats?.cpu_usage?.total_usage || 0);
+        const systemDelta = (stats.cpu_stats?.system_cpu_usage || 0) - (stats.precpu_stats?.system_cpu_usage || 0);
+        const onlineCPUs = stats.cpu_stats?.online_cpus || (stats.cpu_stats?.cpu_usage?.percpu_usage?.length) || 1;
+        if (cpuDelta > 0 && systemDelta > 0) cpuPercent = (cpuDelta / systemDelta) * onlineCPUs * 100.0;
+      } catch (e) { this.logger.debug('Failed to compute cpuPercent', e.message); }
+      const memUsage = stats.memory_stats?.usage || null;
+      const memLimit = stats.memory_stats?.limit || null;
+      let memPercent = null;
+      if (memUsage != null && memLimit && memLimit > 0) memPercent = (memUsage / memLimit) * 100.0;
+      const mapped = { cpuPercent, memBytes: memUsage, memLimitBytes: memLimit, memUsagePercent: memPercent, read: stats.read || null };
+      this.cache.set(key, mapped, this.ttl.stats);
+      return mapped;
     } catch (error) {
-      this.logger.error(`inspectContainer failed for ${containerId}:`, error.message);
-      throw error;
+      this.logger.warn(`getContainerStats failed for ${containerId}:`, error.message);
+      return { error: error.message };
     }
   }
 
@@ -182,7 +286,7 @@ class DockerAPIClient {
     return await this.connect();
   }
 
-  // Additional utility methods for common operations
+  
   async getSystemVersion() {
     await this._ensureConnected();
     
@@ -211,6 +315,17 @@ class DockerAPIClient {
     } catch (error) {
       this.logger.error('getSystemInfo failed:', error.message);
       throw error;
+    }
+  }
+
+  _maybeLogCacheSummary() {
+    if (process.env.CACHE_DEBUG !== 'true') return;
+    if (process.env.CACHE_DEBUG_VERBOSE === 'true') return;
+    const now = Date.now();
+    if (this.cacheCounters.ops % 25 === 0 || (now - this.cacheCounters.lastSummary) > 30000) {
+      this.cacheCounters.lastSummary = now;
+      const c = this.cacheCounters;
+      this.logger.debug(`cache summary containers h/m=${c.containers.hits}/${c.containers.misses} inspect h/m=${c.inspect.hits}/${c.inspect.misses} stats h/m=${c.stats.hits}/${c.stats.misses} totalOps=${c.ops}`);
     }
   }
 }

@@ -6,11 +6,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-/**
- * Displays a colored status indicator with tooltip for a network port's reachability and status.
- *
- * Fetches the port's status from an API and visually represents it as a colored dot, with a tooltip describing the current state (e.g., reachable, unreachable, checking). Calls the optional `onProtocolChange` callback if the protocol is detected.
- */
 export function PortStatusIndicator({
   serverId,
   serverUrl,
@@ -27,6 +22,16 @@ export function PortStatusIndicator({
     let pingApiUrl = `/api/ping?host_ip=${encodeURIComponent(
       port.host_ip
     )}&host_port=${port.host_port}`;
+
+    if (port.internal) {
+      pingApiUrl += `&internal=true`;
+      if (port.container_id) {
+        pingApiUrl += `&container_id=${encodeURIComponent(port.container_id)}`;
+      }
+      if (serverId) {
+        pingApiUrl += `&server_id=${encodeURIComponent(serverId)}`;
+      }
+    }
     
     if (port.owner) {
       pingApiUrl += `&owner=${encodeURIComponent(port.owner)}`;
@@ -66,7 +71,7 @@ export function PortStatusIndicator({
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [port.host_ip, port.host_port, port.owner, serverId, serverUrl, onProtocolChange]);
+  }, [port.host_ip, port.host_port, port.owner, port.internal, port.container_id, serverId, serverUrl, onProtocolChange]);
 
   const getDotState = () => {
     if (checking) {

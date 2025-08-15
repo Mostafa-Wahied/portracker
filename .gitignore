@@ -52,6 +52,9 @@ debug-*.md
 validate-*.sh
 *.tar
 
+# Local-only lint config (personal strict rules, not for production)
+.eslint.local.cjs
+
 # Docker
 .dockerignore
 

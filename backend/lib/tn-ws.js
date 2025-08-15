@@ -10,10 +10,8 @@ const {
   generateWebSocketURLs,
 } = require("./truenas-auto-discover");
 
-// Initialize centralized logger
 const logger = new Logger("TrueNAS-WS", { debug: process.env.DEBUG === 'true' });
 
-// Helper to log debug messages consistently
 function debugWS(message, ...args) {
   logger.debug(message, ...args);
 }

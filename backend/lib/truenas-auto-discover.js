@@ -6,10 +6,8 @@
 const fs = require("fs");
 const { Logger } = require('./logger');
 
-// Initialize logger for auto-discovery
 const logger = new Logger("TrueNAS-Discovery", { debug: process.env.DEBUG === 'true' });
 
-// Helper function for debug logging
 function debugDiscovery(message, ...args) {
   logger.debug(message, ...args);
 }
@@ -223,8 +221,8 @@ function detectHostAddresses() {
           }
         }
       }
-    } catch (err) {
-      // Fallback silently
+    } catch {
+      ;
     }
     
     hostAddresses.push("host.docker.internal");

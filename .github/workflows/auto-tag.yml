@@ -1,0 +1,87 @@
+name: Auto Tag on Version Change
+
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'package.json' ]
+
+jobs:
+  auto-tag:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+    
+    - name: Get current version
+      id: current-version
+      run: |
+        VERSION=$(node -p "require('./package.json').version")
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Current version: $VERSION"
+    
+    - name: Get previous version
+      id: previous-version
+      run: |
+        git checkout HEAD~1 -- package.json 2>/dev/null || echo "No previous version"
+        PREV_VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "none")
+        echo "previous=$PREV_VERSION" >> $GITHUB_OUTPUT
+        echo "Previous version: $PREV_VERSION"
+        git checkout HEAD -- package.json
+    
+    - name: Check if version changed
+      id: version-check
+      run: |
+        CURRENT="${{ steps.current-version.outputs.version }}"
+        PREVIOUS="${{ steps.previous-version.outputs.previous }}"
+        
+        if [ "$CURRENT" != "$PREVIOUS" ]; then
+          echo "Version changed from $PREVIOUS to $CURRENT"
+          echo "changed=true" >> $GITHUB_OUTPUT
+          echo "tag=v$CURRENT" >> $GITHUB_OUTPUT
+        else
+          echo "Version unchanged: $CURRENT"
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Create and push tag
+      if: steps.version-check.outputs.changed == 'true'
+      run: |
+        TAG="${{ steps.version-check.outputs.tag }}"
+        
+        # Check if tag already exists
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          echo "Tag $TAG already exists, skipping"
+          exit 0
+        fi
+        
+        # Create and push the tag
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        git tag -a "$TAG" -m "Release version ${{ steps.current-version.outputs.version }}"
+        git push origin "$TAG"
+        
+        echo "Created and pushed tag: $TAG"
+    
+    - name: Create GitHub Release
+      if: steps.version-check.outputs.changed == 'true'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version-check.outputs.tag }}
+        release_name: Release ${{ steps.current-version.outputs.version }}
+        body: |
+          ## What's Changed
+          
+          Automatic release for version ${{ steps.current-version.outputs.version }}
+          
+          ### Changes
+          - See commit history for detailed changes
+          
+          **Full Changelog**: https://github.com/${{ github.repository }}/compare/v${{ steps.previous-version.outputs.previous }}...${{ steps.version-check.outputs.tag }}
+        draft: false
+        prerelease: false

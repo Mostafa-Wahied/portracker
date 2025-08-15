@@ -118,3 +118,60 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Drawer animations for smooth GPU-accelerated sliding */
+@keyframes slideInRight {
+  from {
+  transform: translate3d(100%, 0, 0);
+  opacity: 0;
+  }
+  to {
+    transform: translate3d(0, 0, 0);
+  opacity: 1;
+  }
+}
+
+@keyframes slideOutRight {
+  from {
+    transform: translate3d(0, 0, 0);
+  opacity: 1;
+  }
+  to {
+    transform: translate3d(100%, 0, 0);
+  opacity: 0;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+
+/* Respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Reduce costly shadow blur during motion (applied via motion-safe utility) */
+@layer utilities {
+  .motion-safe\:shadow-lg[data-state] { box-shadow: 0 10px 15px -3px hsl(0 0% 0% / 0.15), 0 4px 6px -2px hsl(0 0% 0% / 0.1); }
+  .motion-reduce\:shadow-none { box-shadow: none; }
+}

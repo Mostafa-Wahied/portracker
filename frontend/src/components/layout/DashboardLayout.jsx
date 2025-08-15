@@ -6,7 +6,7 @@ export function DashboardLayout({
 }) {
   return (
     <div className="flex flex-1 overflow-hidden">
-      {/* Overlay for mobile */}
+      
       {isSidebarOpen && (
         <div
           className="fixed inset-0 bg-black bg-opacity-50 z-30 md:hidden"

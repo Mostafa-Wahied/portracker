@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Lock } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
   formatCreatedTooltip,
@@ -42,9 +43,14 @@ function PortTableRowComponent({
   onCopy,
   onNote,
   onToggleIgnore,
+  forceOpenDetails,
+  notifyOpenDetails,
+  notifyCloseDetails,
 }) {
   const [protocol, setProtocol] = useState("http");
+  const [showDetails, setShowDetails] = useState(false);
   const searchMatches = getSearchMatches(port, searchTerm);
+  const canShowDetails = port?.source === "docker" && !!port?.container_id;
 
   const shouldHighlight = !!searchTerm;
 
@@ -72,6 +78,7 @@ function PortTableRowComponent({
       tabIndex="0"
       className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50"
     >
+      
       <td className="px-4 py-3 text-center">
         <div className="flex justify-center">
           <PortStatusIndicator
@@ -82,79 +89,125 @@ function PortTableRowComponent({
           />
         </div>
       </td>
+
+      
       <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-slate-100">
         <div className="flex flex-col space-y-1">
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <a
-                  href={`${protocol}://${hostForUi}:${port.host_port}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group/link inline-flex items-center space-x-1 hover:text-indigo-600 dark:hover:text-indigo-400"
-                >
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-200 text-sm font-semibold">
-                    {shouldHighlight
-                      ? renderHighlightedText(
-                          highlightText(port.host_port.toString(), searchTerm)
-                        )
-                      : port.host_port}
-                  </span>
-                  <ExternalLink className="w-3 h-3 text-indigo-600 dark:text-indigo-400 opacity-0 group-hover/link:opacity-100 transition-opacity" />
-                </a>
-              </TooltipTrigger>
-              {port.target && (
-                <TooltipContent>
-                  {searchMatches.target ? (
-                    <span>
-                      Internal:{" "}
-                      {shouldHighlight
-                        ? renderHighlightedText(
-                            highlightText(port.target, searchTerm)
-                          )
-                        : port.target}
+          <div className="flex items-center">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                    {port.internal ? (
+                    <span className="group/link inline-flex items-center space-x-1">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-200 text-sm font-semibold">
+                        {shouldHighlight
+                          ? renderHighlightedText(
+                              highlightText(port.host_port.toString(), searchTerm)
+                            )
+                          : port.host_port}
+                          <Lock className="ml-1 h-[0.8em] w-[0.8em] align-middle shrink-0" aria-hidden="true" />
+                      </span>
                     </span>
                   ) : (
-                    `Internal: ${port.target}`
+                    <a
+                      href={`${protocol}://${hostForUi}:${port.host_port}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group/link inline-flex items-center space-x-1 hover:text-indigo-600 dark:hover:text-indigo-400"
+                    >
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-200 text-sm font-semibold">
+                        {shouldHighlight
+                          ? renderHighlightedText(
+                              highlightText(port.host_port.toString(), searchTerm)
+                            )
+                          : port.host_port}
+                      </span>
+                      <ExternalLink className="w-3 h-3 text-indigo-600 dark:text-indigo-400 opacity-0 group-hover/link:opacity-100 transition-opacity" />
+                    </a>
                   )}
-                </TooltipContent>
-              )}
-            </Tooltip>
-          </TooltipProvider>
+                </TooltipTrigger>
+                {port.internal ? (
+                  <TooltipContent>Internal only</TooltipContent>
+                ) : (
+                  !port.internal && port.target && (
+                    <TooltipContent>
+                      {searchMatches.target ? (
+                        <span>
+                          Internal:{" "}
+                          {shouldHighlight
+                            ? renderHighlightedText(
+                                highlightText(port.target, searchTerm)
+                              )
+                            : port.target}
+                        </span>
+                      ) : (
+                        `Internal: ${port.target}`
+                      )}
+                    </TooltipContent>
+                  )
+                )}
+              </Tooltip>
+            </TooltipProvider>
+            
+          </div>
 
-          {/* Show internal port when search matches and it's different */}
-          {searchMatches.target &&
-            port.target !== port.host_port.toString() && (
-              <span className="text-xs text-slate-500 dark:text-slate-400 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded border border-yellow-200 dark:border-yellow-700/50">
-                Internal:{" "}
-                {shouldHighlight
-                  ? renderHighlightedText(
-                      highlightText(port.target, searchTerm)
-                    )
-                  : port.target}
-              </span>
-            )}
-        </div>
-      </td>
-      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
-        <div className="flex flex-col space-y-1">
-          <span className="truncate">
-            {shouldHighlight
-              ? renderHighlightedText(highlightText(port.owner, searchTerm))
-              : port.owner}
-          </span>
-          {port.note && (
-            <span
-              className="text-xs text-slate-400 dark:text-slate-500 italic"
-              title={port.note}
-            >
+          
+          {searchMatches.target && port.target !== port.host_port.toString() && (
+            <span className="text-xs text-slate-500 dark:text-slate-400 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded border border-yellow-200 dark:border-yellow-700/50">
+              Internal:{" "}
               {shouldHighlight
-                ? renderHighlightedText(highlightText(port.note, searchTerm))
-                : port.note}
+                ? renderHighlightedText(highlightText(port.target, searchTerm))
+                : port.target}
             </span>
           )}
         </div>
       </td>
+
+      
+      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
+        <div className="flex flex-col space-y-1">
+          {canShowDetails ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => setShowDetails(true)}
+                    className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+                  >
+                    {shouldHighlight
+                      ? renderHighlightedText(highlightText(port.owner, searchTerm))
+                      : port.owner}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Open container details</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <span className="truncate inline-flex items-center">
+              {shouldHighlight
+                ? renderHighlightedText(highlightText(port.owner, searchTerm))
+                : port.owner}
+            </span>
+          )}
+          {port.note && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-xs text-slate-400 dark:text-slate-500 italic">
+                    {shouldHighlight
+                      ? renderHighlightedText(highlightText(port.note, searchTerm))
+                      : port.note}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{port.note}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
+      </td>
+
+      
       <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
         <span
           className={`inline-block px-2 py-0.5 rounded font-medium ${
@@ -166,11 +219,15 @@ function PortTableRowComponent({
           {port.source}
         </span>
       </td>
+
+      
       <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300 font-mono">
         {shouldHighlight
           ? renderHighlightedText(highlightText(hostForUi, searchTerm))
           : hostForUi}
       </td>
+
+      
       <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
         {port.created ? (
           <TooltipProvider>
@@ -187,6 +244,8 @@ function PortTableRowComponent({
           "N/A"
         )}
       </td>
+
+      
       <td className="px-4 py-3 text-right">
         <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
           <PortActions
@@ -199,6 +258,17 @@ function PortTableRowComponent({
           />
         </div>
       </td>
+
+      <InternalPortDetails
+        open={forceOpenDetails || showDetails}
+        onOpenChange={(next) => {
+          if (!forceOpenDetails) setShowDetails(next);
+          if (!next && notifyCloseDetails) notifyCloseDetails();
+          if (next && notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+        }}
+        containerId={port.container_id}
+        serverId={serverId}
+      />
     </tr>
   );
 }

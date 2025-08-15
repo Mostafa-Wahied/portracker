@@ -7,8 +7,6 @@ import {
   Home,
   Clock,
   Container,
-  Activity,
-  Info,
 } from "lucide-react";
 import { formatBytes, formatUptime } from "@/lib/utils";
 
@@ -67,7 +65,7 @@ export function SystemInfoCard({ systemInfo, platformName }) {
   return (
     <div className="bg-white dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700/50 p-6 h-full">
       <div className="space-y-3">
-        {/* Primary, full-width info */}
+        
         <div className="space-y-2 border-b border-slate-200 dark:border-slate-700/50 pb-3">
           <InfoItem
             icon={Home}
@@ -95,7 +93,7 @@ export function SystemInfoCard({ systemInfo, platformName }) {
           />
         </div>
 
-        {/* Secondary, two-column stats */}
+        
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 pt-1">
           <InfoItem icon={Cpu} label="CPU Cores" value={info.cpuCores} />
           <InfoItem

@@ -7,6 +7,7 @@
  */
 
 const { Logger } = require("../lib/logger");
+const { SimpleTTLCache } = require("../utils/cache");
 
 class BaseCollector {
   /**
@@ -19,8 +20,10 @@ class BaseCollector {
     this.platform = "generic";
     this.platformName = "Generic Platform";
     
-    // Initialize logger for this collector
-    this.logger = new Logger(this.platformName, { debug: this.debug });
+  this.logger = new Logger(this.platformName, { debug: this.debug });
+  this._cache = new SimpleTTLCache();
+  this.cacheDisabled = process.env.DISABLE_CACHE === 'true' || config.disableCache === true;
+  this.defaultCacheTTL = parseInt(process.env.COLLECTOR_CACHE_TTL_MS || '30000', 10);
   }
 
   /**
@@ -68,7 +71,6 @@ class BaseCollector {
       return await this.collect();
     }
 
-    // Otherwise use the standard approach
     try {
       const [systemInfo, applications, ports, vms] = await Promise.allSettled([
         this.getSystemInfo(),
@@ -182,6 +184,43 @@ class BaseCollector {
    */
   logWarn(...args) {
     this.logger.warn(...args);
+  }
+
+  /**
+   * Generic TTL cache helper for collectors
+   * @param {string} key
+   * @param {Function} fetchFn async -> value
+   * @param {Object} options { ttlMs, forceRefresh }
+   */
+  async cacheGetOrSet(key, fetchFn, { ttlMs, forceRefresh } = {}) {
+    if (this.cacheDisabled) {
+      if (this.debug) this.log(`Cache disabled; bypassing for ${key}`);
+      return fetchFn();
+    }
+    const effectiveTTL = typeof ttlMs === 'number' ? ttlMs : this.defaultCacheTTL;
+    const namespacedKey = `${this.platform}:${key}`;
+    if (!forceRefresh) {
+      const cached = this._cache.get(namespacedKey);
+      if (cached !== undefined) {
+        if (this.debug) this.log(`Cache hit: ${namespacedKey}`);
+        return cached;
+      }
+      if (this.debug) this.log(`Cache miss: ${namespacedKey}`);
+    } else if (this.debug) {
+      this.log(`Force refresh: ${namespacedKey}`);
+    }
+    const fresh = await fetchFn();
+    this._cache.set(namespacedKey, fresh, effectiveTTL);
+    return fresh;
+  }
+
+  clearCache(key) {
+    const namespacedKey = `${this.platform}:${key}`;
+    this._cache.delete(namespacedKey);
+  }
+
+  clearAllCache() {
+    this._cache.clear();
   }
 }
 

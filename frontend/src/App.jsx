@@ -16,12 +16,11 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { Label } from "@/components/ui/label";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { MultipleServerSkeleton } from "./components/server/MultipleServerSkeleton";
+import { WhatsNewModal } from "./components/ui/WhatsNewModal";
 import { BarChart3 } from "lucide-react";
 import Logger from "./lib/logger";
+import { useWhatsNew } from "./lib/hooks/useWhatsNew";const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 
-const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
-
-// Initialize logger for App component
 const logger = new Logger('App');
 
 
@@ -29,7 +28,8 @@ export default function App() {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  
+  const { shouldShowButton: shouldShowWhatsNewButton, handleShow: handleShowWhatsNew, getModalProps: getWhatsNewModalProps } = useWhatsNew();
 
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [modalSrvId, setModalSrvId] = useState("");
@@ -59,6 +59,15 @@ export default function App() {
   );
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchScope, setSearchScope] = useState(() => {
+    try {
+      const saved = localStorage.getItem("searchScope");
+      if (saved === "all") return "all";
+      return "server";
+    } catch {
+      return "server";
+    }
+  });
   const [searchHighlighting, setSearchHighlighting] = useState(() => {
     try {
       const saved = localStorage.getItem("searchHighlighting");
@@ -121,6 +130,9 @@ export default function App() {
   });
 
   const [isSidebarOpen, setSidebarOpen] = useState(false);
+  const [deepLinkContainer, setDeepLinkContainer] = useState(null);
+  const [deepLinkServer, setDeepLinkServer] = useState(null);
+  const [appliedDeepLink, setAppliedDeepLink] = useState(false);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -190,6 +202,14 @@ export default function App() {
       logger.warn("Failed to save search highlighting setting:", error);
     }
   }, [searchHighlighting]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("searchScope", searchScope);
+    } catch (error) {
+      logger.warn("Failed to save search scope setting:", error);
+    }
+  }, [searchScope]);
 
   const handleSelectServer = useCallback((serverId) => {
     setSelectedServer(serverId);
@@ -492,15 +512,21 @@ export default function App() {
     }
   }, [fetchAll]);
 
-  useEffect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(fetchAll, 30000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, fetchAll]);
+  
 
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const c = params.get('container');
+      const s = params.get('server');
+      if (c) setDeepLinkContainer(c);
+      if (s) setDeepLinkServer(s);
+  } catch { void 0; }
+  }, []);
 
   useEffect(() => {
     if (!loading && groups.length > 0) {
@@ -509,10 +535,47 @@ export default function App() {
       if (!selectionIsValid) {
         setSelectedServer(groups[0].id);
       }
+      if (!appliedDeepLink && deepLinkServer && groups.some(g => g.id === deepLinkServer)) {
+        setSelectedServer(deepLinkServer);
+      }
     } else if (!loading && groups.length === 0 && selectedServer) {
       setSelectedServer(null);
     }
-  }, [groups, loading, selectedServer]);
+  }, [groups, loading, selectedServer, deepLinkServer, appliedDeepLink]);
+
+  useEffect(() => {
+    if (!appliedDeepLink && deepLinkServer && selectedServer === deepLinkServer) {
+      setAppliedDeepLink(true);
+    }
+  }, [appliedDeepLink, deepLinkServer, selectedServer]);
+
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      if (selectedServer) url.searchParams.set('server', selectedServer); else url.searchParams.delete('server');
+      if (deepLinkContainer) url.searchParams.set('container', deepLinkContainer);
+      window.history.replaceState({}, '', url.toString());
+  } catch { void 0; }
+  }, [selectedServer, deepLinkContainer]);
+
+  const handleContainerOpen = useCallback((serverId, containerId) => {
+    setDeepLinkContainer(containerId);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('container', containerId);
+      url.searchParams.set('server', serverId);
+      window.history.replaceState({}, '', url.toString());
+  } catch { void 0; }
+  }, []);
+
+  const handleContainerClose = useCallback(() => {
+    setDeepLinkContainer(null);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('container');
+      window.history.replaceState({}, '', url.toString());
+  } catch { void 0; }
+  }, []);
 
   const toggleIgnore = useCallback(
     (srvId, p) => {
@@ -876,7 +939,7 @@ export default function App() {
     const filteredServer = filterPorts(server);
 
     return (
-      <ServerSection
+  <ServerSection
         key={server.id}
         id={server.id}
         server={server.server}
@@ -953,9 +1016,32 @@ export default function App() {
         isExpanded={!!expandedServers[server.id]}
         onToggleExpanded={() => toggleServerExpanded(server.id)}
         openAccordionItems={openAccordions[server.id] ?? ["system-info", "vms"]}
-        onAccordionChange={(items) => handleAccordionChange(server.id, items)}
+  onAccordionChange={(items) => handleAccordionChange(server.id, items)}
+  deepLinkContainerId={selectedServer === server.id ? deepLinkContainer : null}
+  onOpenContainerDetails={(containerId) => handleContainerOpen(server.id, containerId)}
+  onCloseContainerDetails={handleContainerClose}
       />
     );
+  }
+
+  function renderAllMatchingServers() {
+    const matching = groups
+      .map((srv) => filterPorts(srv))
+      .filter((srv) => srv.ok && Array.isArray(srv.data) && srv.data.length > 0);
+
+    if (matching.length === 0) {
+      return (
+        <div className="text-center py-12 text-gray-500 dark:text-slate-400">
+          No matches across servers.
+        </div>
+      );
+    }
+
+    return matching.map((srv) => (
+      <div key={srv.id} className="space-y-8">
+        {renderServer(srv)}
+      </div>
+    ));
   }
 
   const serverToRender = selectedServer
@@ -970,10 +1056,11 @@ export default function App() {
           groups={groups}
           loading={loading}
           onRefresh={fetchAll}
-          autoRefresh={autoRefresh}
-          setAutoRefresh={setAutoRefresh}
+          
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
+          searchScope={searchScope}
+          onSearchScopeChange={setSearchScope}
           searchHighlighting={searchHighlighting}
           onSearchHighlightingChange={setSearchHighlighting}
           filters={filters}
@@ -983,6 +1070,8 @@ export default function App() {
           onThemeToggle={() => setIsDarkMode(!isDarkMode)}
           onGoHome={handleLogoClick}
           onToggleSidebar={() => setSidebarOpen(!isSidebarOpen)}
+          onShowWhatsNew={shouldShowWhatsNewButton ? handleShowWhatsNew : null}
+          hasNewFeatures={shouldShowWhatsNewButton}
         />
         <DashboardLayout
           isSidebarOpen={isSidebarOpen}
@@ -1011,17 +1100,21 @@ export default function App() {
               )}
 
               {!loading && !selectedServer && (
-                <div className="text-center py-24 text-slate-500 dark:text-slate-400 flex flex-col items-center">
-                  <BarChart3 className="h-16 w-16 mb-4 text-slate-400" />
-                  <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">
-                    Dashboard Home
-                  </h2>
-                  <p className="mt-2 max-w-md">
-                    Select a server from the sidebar to view its ports, system
-                    information, and more. Use the "Add Server" button to
-                    connect to new local or remote environments.
-                  </p>
-                </div>
+                searchTerm && searchScope === "all" ? (
+                  <div className="space-y-8">{renderAllMatchingServers()}</div>
+                ) : (
+                  <div className="text-center py-24 text-slate-500 dark:text-slate-400 flex flex-col items-center animate-in fade-in-0 duration-300">
+                    <BarChart3 className="h-16 w-16 mb-4 text-slate-400" />
+                    <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">
+                      Dashboard Home
+                    </h2>
+                    <p className="mt-2 max-w-md">
+                      Select a server from the sidebar to view its ports, system
+                      information, and more. Use the "Add Server" button to
+                      connect to new local or remote environments.
+                    </p>
+                  </div>
+                )
               )}
 
               {!loading && noDataForSelection && (
@@ -1031,8 +1124,12 @@ export default function App() {
                 </div>
               )}
 
-              {!loading && serverToRender && (
-                <div className="space-y-8">{renderServer(serverToRender)}</div>
+              {!loading && serverToRender && !(searchTerm && searchScope === "all") && (
+                <div className="space-y-8 animate-in fade-in-0 duration-300">{renderServer(serverToRender)}</div>
+              )}
+
+              {!loading && selectedServer && searchTerm && searchScope === "all" && (
+                <div className="space-y-8 animate-in fade-in-0 duration-300">{renderAllMatchingServers()}</div>
               )}
             </div>
           </main>
@@ -1067,6 +1164,10 @@ export default function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WhatsNewModal
+        {...getWhatsNewModalProps()}
+      />
     </TooltipProvider>
   );
 
