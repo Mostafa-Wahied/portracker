@@ -16,8 +16,16 @@ import { Sidebar } from "./components/layout/Sidebar";
 import { Label } from "@/components/ui/label";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { MultipleServerSkeleton } from "./components/server/MultipleServerSkeleton";
+import { WhatsNewModal } from "./components/ui/WhatsNewModal";
 import { BarChart3 } from "lucide-react";
 import Logger from "./lib/logger";
+import { 
+  parseChangelog, 
+  shouldShowWhatsNew, 
+  setLastSeenVersion, 
+  getNewVersions,
+  combineVersionChanges
+} from "./lib/whats-new";
 
 const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 
@@ -28,6 +36,12 @@ export default function App() {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  const [whatsNewModalOpen, setWhatsNewModalOpen] = useState(false);
+  const [whatsNewData, setWhatsNewData] = useState({});
+  const [newVersions, setNewVersions] = useState([]);
+  const [currentVersion, setCurrentVersion] = useState(null);
+  const [hasUnseenFeatures, setHasUnseenFeatures] = useState(false);
   
 
   const [noteModalOpen, setNoteModalOpen] = useState(false);
@@ -518,6 +532,27 @@ export default function App() {
   }, [fetchAll]);
 
   useEffect(() => {
+    const fetchVersion = async () => {
+      try {
+        const response = await fetch('/api/version');
+        if (response.ok) {
+          const versionData = await response.json();
+          setCurrentVersion(versionData.version);
+          logger.debug('Fetched current version:', versionData.version);
+        } else {
+          logger.warn('Failed to fetch version info:', response.status);
+          setCurrentVersion('1.0.6');
+        }
+      } catch (error) {
+        logger.warn('Failed to fetch version info:', error);
+        setCurrentVersion('1.0.6');
+      }
+    };
+
+    fetchVersion();
+  }, []);
+
+  useEffect(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const c = params.get('container');
@@ -575,6 +610,37 @@ export default function App() {
       window.history.replaceState({}, '', url.toString());
   } catch { void 0; }
   }, []);
+
+  const handleWhatsNewClose = useCallback(() => {
+    setWhatsNewModalOpen(false);
+    if (newVersions.length > 0) {
+      setLastSeenVersion(newVersions[0]);
+      setHasUnseenFeatures(false);
+    }
+  }, [newVersions]);
+
+  const handleShowWhatsNew = useCallback(() => {
+    setWhatsNewModalOpen(true);
+    
+    const hasExistingData = newVersions.length > 0 && whatsNewData[newVersions[0]];
+    
+    if (!hasExistingData) {
+      const testChanges = {
+        frontend: [
+          { title: "Container Details Drawer", description: "New slide-out panel to show detailed information for Docker containers including stats, labels, mounts, and environment variables" },
+          { title: "Internal Port Display", description: "UI now correctly shows and differentiates internal-only ports from published ports with health status monitoring" },
+          { title: "Global Search", description: "Search bar now includes an option to search across all servers simultaneously" },
+          { title: "What's New Modal", description: "Automatic notification system to stay updated with new features when opening new versions" }
+        ],
+        backend: [
+          { title: "Collector Caching", description: "Added caching mechanism to all data collectors to reduce duplicate requests and improve data refresh speed" }
+        ]
+      };
+      setWhatsNewData(prev => ({ ...prev, [currentVersion]: testChanges }));
+      setNewVersions([currentVersion]);
+    }
+    
+  }, [whatsNewData, newVersions, currentVersion]);
 
   const toggleIgnore = useCallback(
     (srvId, p) => {
@@ -906,6 +972,71 @@ export default function App() {
     fetchServers();
   }, [fetchServers]);
 
+  useEffect(() => {
+    const initializeWhatsNew = async () => {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const forceShow = urlParams.get('whatsnew') === '1';
+        
+        logger.debug('What\'s New initialization started:', { forceShow, currentVersion, loading });
+        
+        if (forceShow || shouldShowWhatsNew(currentVersion)) {
+          logger.debug('Should show What\'s New modal');
+          
+          const response = await fetch('/api/changelog');
+          if (response.ok) {
+            const changelogData = await response.json();
+            const changelogContent = changelogData.content;
+            logger.debug('Fetched changelog content:', changelogContent.substring(0, 200) + '...');
+            
+            const parsedVersions = parseChangelog(changelogContent);
+            const lastSeenVersion = localStorage.getItem('portracker_last_seen_version');
+            
+            let newVersionsList;
+            if (forceShow) {
+              newVersionsList = [currentVersion];
+            } else {
+              newVersionsList = getNewVersions(parsedVersions, lastSeenVersion);
+            }
+            
+            logger.debug('What\'s New debug:', { 
+              currentVersion, 
+              lastSeenVersion, 
+              forceShow,
+              hasNewVersions: newVersionsList.length > 0,
+              parsedVersionsKeys: Object.keys(parsedVersions),
+              newVersionsList,
+              parsedVersionsData: parsedVersions
+            });
+            
+            if (newVersionsList.length > 0) {
+              setWhatsNewData(parsedVersions);
+              setNewVersions(newVersionsList);
+              setHasUnseenFeatures(true);
+              setWhatsNewModalOpen(true);
+              logger.debug('What\'s New modal should be opening');
+            } else {
+              logger.debug('No new versions to show');
+            }
+          } else {
+            logger.warn('Failed to fetch CHANGELOG.md:', response.status);
+          }
+        } else {
+          logger.debug('Should not show What\'s New modal based on version check');
+        }
+      } catch (error) {
+        logger.warn('Failed to initialize What\'s New modal:', error);
+      }
+    };
+
+    if (!loading && currentVersion) {
+      logger.debug('App finished loading and version fetched, initializing What\'s New');
+      initializeWhatsNew();
+    } else {
+      logger.debug('App still loading or version not fetched, skipping What\'s New initialization', { loading, currentVersion });
+    }
+  }, [loading, currentVersion]);
+
   const filterPorts = (group) => {
     if (!group.ok || !group.data) return group;
 
@@ -1069,6 +1200,8 @@ export default function App() {
           onThemeToggle={() => setIsDarkMode(!isDarkMode)}
           onGoHome={handleLogoClick}
           onToggleSidebar={() => setSidebarOpen(!isSidebarOpen)}
+          onShowWhatsNew={handleShowWhatsNew}
+          hasNewFeatures={hasUnseenFeatures}
         />
         <DashboardLayout
           isSidebarOpen={isSidebarOpen}
@@ -1161,6 +1294,19 @@ export default function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <WhatsNewModal
+        isOpen={whatsNewModalOpen}
+        onClose={handleWhatsNewClose}
+        version={newVersions.length > 1 
+          ? `${newVersions[newVersions.length - 1]} - ${newVersions[0]}` 
+          : (newVersions.length > 0 ? newVersions[0] : currentVersion)
+        }
+        changes={newVersions.length > 0 
+          ? combineVersionChanges(whatsNewData, newVersions)
+          : whatsNewData[currentVersion] || {}
+        }
+      />
     </TooltipProvider>
   );
 

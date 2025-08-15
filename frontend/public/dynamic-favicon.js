@@ -1,7 +1,7 @@
-// Dynamic favicon generator - creates favicon on-the-fly with proper theme colors
+// Dynamic favicon system for optimal browser visibility
 
 const svgTemplate = `
-<svg width="30" height="30" viewBox="0 0 27 27" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="30" height="30" viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
   <path d="M15.3225 24.9499C17.5242 24.8682 19.6374 24.0618 21.3337 22.6557C23.03 21.2496 24.2144 19.3227 24.703 17.1743" stroke="COLOR_PLACEHOLDER" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M24.7891 13.1733L24.7823 13.1807" stroke="COLOR_PLACEHOLDER" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M23.2946 9.45791C22.43 8.14458 21.2678 7.05367 19.9024 6.27373C18.5371 5.4938 17.0071 5.04682 15.4366 4.9691C13.8661 4.89138 12.2994 5.18511 10.8637 5.82643C9.42804 6.46774 8.16382 7.43858 7.17371 8.66012C6.1836 9.88166 5.49551 11.3195 5.16529 12.8568C4.83507 14.3942 4.87204 15.9877 5.2732 17.5081C5.67435 19.0285 6.42838 20.4328 7.47407 21.6071C8.51976 22.7814 9.82763 23.6926 11.2915 24.2666" stroke="COLOR_PLACEHOLDER" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -13,139 +13,54 @@ const svgTemplate = `
 </svg>`.trim();
 
 function updateFavicon() {
-  function isColorDark(colorString) {
-    try {
-      const oklchMatch = colorString.match(/oklch\(([\d.]+)\s+[\d.]*\s*[\d.]*\)/);
-      if (oklchMatch) {
-        const lightness = parseFloat(oklchMatch[1]);
-        return lightness < 0.5;
-      }
-
-      const rgbMatch = colorString.match(/rgba?\(([^)]+)\)/);
-      if (rgbMatch) {
-        const values = rgbMatch[1].split(',').map(v => parseFloat(v.trim()));
-        if (values.length >= 3) {
-          const [r, g, b] = values;
-          const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-          return luminance < 128;
-        }
-      }
-
-      const tempElement = document.createElement('div');
-      tempElement.style.color = colorString;
-      document.body.appendChild(tempElement);
-      const computedColor = window.getComputedStyle(tempElement).color;
-      document.body.removeChild(tempElement);
-      
-      if (computedColor !== colorString && computedColor.startsWith('rgb')) {
-        return isColorDark(computedColor);
-      }
-
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
   const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  let isDark = mediaQuery ? mediaQuery.matches : false;
-  let detectionMethod = 'media-query';
-
-  if (document.body) {
-    const bodyBackgroundColor = window.getComputedStyle(document.body).backgroundColor;
-    const isBodyDark = isColorDark(bodyBackgroundColor);
-    
-    if (!isDark && isBodyDark) {
-      isDark = true;
-      detectionMethod = 'body-background-override';
-    } else if (isDark && !isBodyDark && bodyBackgroundColor !== 'rgba(0, 0, 0, 0)') {
-      isDark = false;
-      detectionMethod = 'body-background-override-light';
+  let needsWhiteFavicon = mediaQuery.matches;
+  
+  try {
+    const userOverride = localStorage.getItem('portracker_favicon_color');
+    if (userOverride === 'white' || userOverride === 'dark') {
+      needsWhiteFavicon = userOverride === 'white';
+    } else if (window.chrome && navigator.userAgent.includes('Chrome')) {
+      needsWhiteFavicon = true;
+    } else if (navigator.userAgent.includes('Firefox')) {
+      needsWhiteFavicon = true;
     }
+  } catch (error) {
+    needsWhiteFavicon = true;
   }
+  
+  generateAndSetFavicon(needsWhiteFavicon);
+}
 
-  const color = isDark ? '#FFFFFF' : '#1e293b';
+function generateAndSetFavicon(needsWhiteFavicon) {
+  const color = needsWhiteFavicon ? '#FFFFFF' : '#1e293b';
   const finalSvg = svgTemplate.replace(/COLOR_PLACEHOLDER/g, color);
   const faviconUri = `data:image/svg+xml;base64,${btoa(finalSvg)}`;
-
+  
   let faviconLink = document.querySelector('link[rel="icon"]');
   if (!faviconLink) {
     faviconLink = document.createElement('link');
     faviconLink.rel = 'icon';
-    faviconLink.type = 'image/svg+xml';
     document.head.appendChild(faviconLink);
   }
-
   faviconLink.href = faviconUri;
 }
 
-window.updateFavicon = updateFavicon;
-window.testDynamicDarkFavicon = () => {
-  const color = '#FFFFFF';
-  const finalSvg = svgTemplate.replace(/COLOR_PLACEHOLDER/g, color);
-  const faviconUri = `data:image/svg+xml;base64,${btoa(finalSvg)}`;
-  let faviconLink = document.querySelector('link[rel="icon"]');
-  if (!faviconLink) {
-    faviconLink = document.createElement('link');
-    faviconLink.rel = 'icon';
-    faviconLink.type = 'image/svg+xml';
-    document.head.appendChild(faviconLink);
-  }
-  faviconLink.href = faviconUri;
-};
-window.testDynamicLightFavicon = () => {
-  const color = '#1e293b';
-  const finalSvg = svgTemplate.replace(/COLOR_PLACEHOLDER/g, color);
-  const faviconUri = `data:image/svg+xml;base64,${btoa(finalSvg)}`;
-  let faviconLink = document.querySelector('link[rel="icon"]');
-  if (!faviconLink) {
-    faviconLink = document.createElement('link');
-    faviconLink.rel = 'icon';
-    faviconLink.type = 'image/svg+xml';
-    document.head.appendChild(faviconLink);
-  }
-  faviconLink.href = faviconUri;
-};
-
-window.inspectDynamicFavicon = () => {
-  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-  let isDark = mediaQuery.matches;
-  
-  if (!isDark && document.body) {
-    const bodyBackgroundColor = window.getComputedStyle(document.body).backgroundColor;
-    const isBodyDark = (colorString) => {
-      try {
-        const rgbMatch = colorString.match(/\d+/g);
-        if (!rgbMatch || rgbMatch.length < 3) return false;
-        const [r, g, b] = rgbMatch.map(Number);
-        return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
-      } catch { return false; }
-    };
-    if (isBodyDark(bodyBackgroundColor)) {
-      isDark = true;
-    }
-  }
-  
-  const color = isDark ? '#FFFFFF' : '#1e293b';
-  const finalSvg = svgTemplate.replace(/COLOR_PLACEHOLDER/g, color);
-  
-  return {
-    isDark,
-    color,
-    svgCode: finalSvg,
-    dataUri: `data:image/svg+xml;base64,${btoa(finalSvg)}`
-  };
-};
-
-function initializeFavicon() {
+window.setFaviconWhite = function() {
+  localStorage.setItem('portracker_favicon_color', 'white');
   updateFavicon();
-  setTimeout(() => updateFavicon(), 100);
-  setTimeout(() => updateFavicon(), 500);
-}
+};
 
-document.addEventListener('DOMContentLoaded', initializeFavicon);
+window.setFaviconDark = function() {
+  localStorage.setItem('portracker_favicon_color', 'dark');
+  updateFavicon();
+};
+
+window.resetFaviconAuto = function() {
+  localStorage.removeItem('portracker_favicon_color');
+  updateFavicon();
+};
+
+document.addEventListener('DOMContentLoaded', updateFavicon);
 window.addEventListener('load', updateFavicon);
-
-if (window.matchMedia) {
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateFavicon);
-}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', updateFavicon);

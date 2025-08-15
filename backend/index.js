@@ -1508,6 +1508,37 @@ app.get("/api/health", (req, res) => {
   }
 });
 
+app.get('/api/changelog', (req, res) => {
+  logger.debug("Changelog requested");
+  try {
+    const changelogPath = path.join(__dirname, '..', 'CHANGELOG.md');
+    const changelogContent = fs.readFileSync(changelogPath, 'utf8');
+    logger.debug("Changelog read successfully");
+    res.json({ content: changelogContent });
+  } catch (error) {
+    logger.error('Failed to read CHANGELOG.md:', error);
+    res.status(500).json({ error: 'Failed to read changelog' });
+  }
+});
+
+app.get('/api/version', (req, res) => {
+  logger.debug("Version info requested");
+  try {
+    const packagePath = path.join(__dirname, '..', 'package.json');
+    const packageContent = fs.readFileSync(packagePath, 'utf8');
+    const packageData = JSON.parse(packageContent);
+    logger.debug("Version info read successfully:", packageData.version);
+    res.json({ 
+      version: packageData.version,
+      name: packageData.name,
+      description: packageData.description 
+    });
+  } catch (error) {
+    logger.error('Failed to read package.json:', error);
+    res.status(500).json({ error: 'Failed to read version info' });
+  }
+});
+
 app.get("/api/containers/:id/details", async (req, res) => {
   const containerId = req.params.id;
   const currentDebug = req.query.debug === 'true';

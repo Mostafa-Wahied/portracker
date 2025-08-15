@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { RefreshCw, Loader2, Search, X, Sun, Moon, Menu, SlidersHorizontal } from "lucide-react";
+import { RefreshCw, Loader2, Search, X, Sun, Moon, Menu, SlidersHorizontal, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Logo from "@/components/Logo";
@@ -30,6 +30,8 @@ export function AppHeader({
   onThemeToggle,
   onGoHome,
   onToggleSidebar,
+  onShowWhatsNew,
+  hasNewFeatures = false,
 }) {
   const [localSearchTerm, setLocalSearchTerm] = useState(searchTerm);
   const [searching, setSearching] = useState(false);
@@ -249,6 +251,29 @@ export function AppHeader({
           </Tooltip>
 
           <div className="h-6 border-l border-gray-200 dark:border-gray-700 hidden sm:block"></div>
+
+          {onShowWhatsNew && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onShowWhatsNew}
+                  className={`relative hover:bg-gray-100 dark:hover:bg-gray-800 ${
+                    hasNewFeatures ? 'text-indigo-600 dark:text-indigo-400 animate-pulse' : ''
+                  }`}
+                >
+                  <Sparkles className="h-5 w-5" />
+                  {hasNewFeatures && (
+                    <span className="absolute -top-1 -right-1 h-3 w-3 bg-indigo-600 dark:bg-indigo-500 rounded-full animate-pulse" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {hasNewFeatures ? "See what's new!" : "What's new"}
+              </TooltipContent>
+            </Tooltip>
+          )}
 
           <Tooltip>
             <TooltipTrigger asChild>

@@ -81,7 +81,9 @@ export function InternalPortDetails({ open, onOpenChange, containerId, serverId 
   const execTarget = data?.name || data?.id || containerId;
   const execCmd = `docker exec -it ${execTarget} ${shell}`;
 
-  const handleCopyGeneric = async (key, text) => { await copy(key, text); };
+  const handleCopyGeneric = useCallback(async (key, text) => { 
+    await copy(key, text); 
+  }, [copy]);
 
   const loadRaw = () => {
     if (rawState.loading || rawState.data) return;
