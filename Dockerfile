@@ -59,6 +59,10 @@ RUN apt-get clean && \
 
 WORKDIR /app
 
+# Copy root package.json and CHANGELOG.md for version/changelog endpoints
+COPY package.json ./
+COPY CHANGELOG.md ./
+
 # Copy the properly compiled backend
 COPY --from=backend-build /app/backend ./backend/
 
