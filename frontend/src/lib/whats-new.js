@@ -125,9 +125,8 @@ export function getNewVersions(parsedVersions, lastSeenVersion) {
   logger.debug('getNewVersions: Available versions sorted:', availableVersions);
   
   if (!lastSeenVersion) {
-    const result = availableVersions.length > 0 ? [availableVersions[0]] : [];
-    logger.debug('getNewVersions: First time user, returning latest:', result);
-    return result;
+    logger.debug('getNewVersions: No last seen version, returning all versions:', availableVersions);
+    return availableVersions;
   }
   
   const newVersions = availableVersions.filter(version => {
@@ -164,6 +163,39 @@ export function combineVersionChanges(versions, versionKeys) {
   }
   
   return combined;
+}
+
+export function groupVersionChanges(versions, versionKeys) {
+  const sortedVersions = versionKeys.sort((a, b) => compareVersions(b, a));
+  
+  return sortedVersions.map(version => {
+    const versionChanges = versions[version];
+    const changes = { frontend: [], backend: [], development: [] };
+    
+    if (versionChanges) {
+      if (versionChanges.frontend) {
+        changes.frontend.push(...versionChanges.frontend);
+      }
+      if (versionChanges.backend) {
+        changes.backend.push(...versionChanges.backend);
+      }
+      if (versionChanges.development) {
+        changes.development.push(...versionChanges.development);
+      }
+      if (versionChanges.infrastructure) {
+        changes.development.push(...versionChanges.infrastructure);
+      }
+    }
+    
+    return {
+      version,
+      changes
+    };
+  }).filter(item => 
+    item.changes.frontend.length > 0 || 
+    item.changes.backend.length > 0 || 
+    item.changes.development.length > 0
+  );
 }
 
 export function shouldShowWhatsNew(currentVersion) {

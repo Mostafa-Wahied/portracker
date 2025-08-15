@@ -8,7 +8,7 @@ All notable changes to Portracker will be documented in this file.
 - **Container Details Drawer**: New slide-out panel to show detailed information for Docker containers including stats, labels, mounts, and environment variables
 - **Internal Port Display**: UI now correctly shows and differentiates internal-only ports from published ports with health status monitoring
 - **Global Search**: Search bar now includes an option to search across all servers simultaneously
-- **What's New Modal**: Automatic notification system to stay updated with new features when opening new versions
+- **What's New**: Automatic notification system to stay updated with new features when releasing new versions
 
 ### Backend
 - **Collector Caching**: Added caching mechanism to all data collectors to reduce duplicate requests and improve data refresh speed
@@ -22,7 +22,6 @@ All notable changes to Portracker will be documented in this file.
 ## [1.0.4] - 2024-XX-XX
 
 ### Frontend
-- **Internal Port Visibility**: All ports are now visible, including internal-only ports that weren't previously shown in the interface
 - **Enhanced Service Detection**: Improved identification and categorization of running services with Single Page Application (SPA) detection support
 - **Port Status Indicators**: Added clear visual distinction between different types of ports (published vs internal) with detailed status information
 
@@ -34,7 +33,7 @@ All notable changes to Portracker will be documented in this file.
 ## [1.0.3] - 2024-XX-XX
 
 ### Infrastructure
-- **Simplified Docker Dependencies**: Streamlined system requirements - no longer requires mounting additional system sockets for container information
+- **Simplified Docker Dependencies**: Streamlined system requirements - no longer requires mounting additional system sockets for container information and support for docker proxy.
 - **Enhanced Data Accuracy**: Improved container information display with more accurate timestamps and metadata parsing
 
 ## [1.0.2] - 2024-XX-XX

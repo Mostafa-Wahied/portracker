@@ -265,7 +265,7 @@ export function AppHeader({
                 >
                   <Sparkles className="h-5 w-5" />
                   {hasNewFeatures && (
-                    <span className="absolute -top-1 -right-1 h-3 w-3 bg-indigo-600 dark:bg-indigo-500 rounded-full animate-pulse" />
+                    <span className="absolute " />
                   )}
                 </Button>
               </TooltipTrigger>
