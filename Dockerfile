@@ -59,7 +59,7 @@ RUN apt-get clean && \
 
 WORKDIR /app
 
-# Copy root package.json and CHANGELOG.md for version/changelog endpoints
+# For What's New feature
 COPY package.json ./
 COPY CHANGELOG.md ./
 
