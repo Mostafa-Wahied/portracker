@@ -19,15 +19,14 @@ import { MultipleServerSkeleton } from "./components/server/MultipleServerSkelet
 import { WhatsNewModal } from "./components/ui/WhatsNewModal";
 import { BarChart3 } from "lucide-react";
 import Logger from "./lib/logger";
-import { 
-  parseChangelog, 
-  shouldShowWhatsNew, 
-  setLastSeenVersion, 
+import {
+  parseChangelog,
   getNewVersions,
-  combineVersionChanges
-} from "./lib/whats-new";
-
-const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
+  setLastSeenVersion,
+  combineVersionChanges,
+  compareVersions,
+  shouldShowWhatsNew
+} from './lib/whats-new';const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 
 const logger = new Logger('App');
 
@@ -42,6 +41,14 @@ export default function App() {
   const [newVersions, setNewVersions] = useState([]);
   const [currentVersion, setCurrentVersion] = useState(null);
   const [hasUnseenFeatures, setHasUnseenFeatures] = useState(false);
+  const [hasNewFeaturesToShow, setHasNewFeaturesToShow] = useState(false);
+  const [isWhatsNewDismissed, setIsWhatsNewDismissed] = useState(() => {
+    try {
+      return localStorage.getItem('portracker_whats_new_dismissed') === 'true';
+    } catch {
+      return false;
+    }
+  });
   
 
   const [noteModalOpen, setNoteModalOpen] = useState(false);
@@ -613,11 +620,8 @@ export default function App() {
 
   const handleWhatsNewClose = useCallback(() => {
     setWhatsNewModalOpen(false);
-    if (newVersions.length > 0) {
-      setLastSeenVersion(newVersions[0]);
-      setHasUnseenFeatures(false);
-    }
-  }, [newVersions]);
+    setHasUnseenFeatures(false);
+  }, []);
 
   const handleShowWhatsNew = useCallback(() => {
     setWhatsNewModalOpen(true);
@@ -641,6 +645,21 @@ export default function App() {
     }
     
   }, [whatsNewData, newVersions, currentVersion]);
+
+  const handleDismissWhatsNew = useCallback(() => {
+    try {
+      localStorage.setItem('portracker_whats_new_dismissed', 'true');
+      setIsWhatsNewDismissed(true);
+      setHasUnseenFeatures(false);
+      setHasNewFeaturesToShow(false);
+      
+      if (newVersions.length > 0) {
+        setLastSeenVersion(newVersions[0]);
+      }
+    } catch (error) {
+      void error;
+    }
+  }, [newVersions]);
 
   const toggleIgnore = useCallback(
     (srvId, p) => {
@@ -997,6 +1016,21 @@ export default function App() {
               newVersionsList = [currentVersion];
             } else {
               newVersionsList = getNewVersions(parsedVersions, lastSeenVersion);
+              
+              if (newVersionsList.length > 0 && lastSeenVersion) {
+                const hasNewerVersion = newVersionsList.some(version => 
+                  compareVersions(version, currentVersion) >= 0
+                );
+                if (hasNewerVersion) {
+                  setIsWhatsNewDismissed(false);
+                  setHasNewFeaturesToShow(false);
+                  try {
+                    localStorage.removeItem('portracker_whats_new_dismissed');
+                  } catch (error) {
+                    void error;
+                  }
+                }
+              }
             }
             
             logger.debug('What\'s New debug:', { 
@@ -1012,8 +1046,11 @@ export default function App() {
             if (newVersionsList.length > 0) {
               setWhatsNewData(parsedVersions);
               setNewVersions(newVersionsList);
-              setHasUnseenFeatures(true);
-              setWhatsNewModalOpen(true);
+              setHasNewFeaturesToShow(true);
+              if (forceShow || !isWhatsNewDismissed) {
+                setHasUnseenFeatures(true);
+                setWhatsNewModalOpen(true);
+              }
               logger.debug('What\'s New modal should be opening');
             } else {
               logger.debug('No new versions to show');
@@ -1035,7 +1072,7 @@ export default function App() {
     } else {
       logger.debug('App still loading or version not fetched, skipping What\'s New initialization', { loading, currentVersion });
     }
-  }, [loading, currentVersion]);
+  }, [loading, currentVersion, isWhatsNewDismissed]);
 
   const filterPorts = (group) => {
     if (!group.ok || !group.data) return group;
@@ -1200,7 +1237,11 @@ export default function App() {
           onThemeToggle={() => setIsDarkMode(!isDarkMode)}
           onGoHome={handleLogoClick}
           onToggleSidebar={() => setSidebarOpen(!isSidebarOpen)}
-          onShowWhatsNew={handleShowWhatsNew}
+          onShowWhatsNew={(() => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const debugForceShow = urlParams.get('whatsnew') === '1';
+            return (debugForceShow || (!isWhatsNewDismissed && hasNewFeaturesToShow)) ? handleShowWhatsNew : null;
+          })()}
           hasNewFeatures={hasUnseenFeatures}
         />
         <DashboardLayout
@@ -1298,6 +1339,7 @@ export default function App() {
       <WhatsNewModal
         isOpen={whatsNewModalOpen}
         onClose={handleWhatsNewClose}
+        onDismiss={handleDismissWhatsNew}
         version={newVersions.length > 1 
           ? `${newVersions[newVersions.length - 1]} - ${newVersions[0]}` 
           : (newVersions.length > 0 ? newVersions[0] : currentVersion)

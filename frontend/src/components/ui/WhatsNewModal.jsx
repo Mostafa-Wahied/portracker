@@ -5,7 +5,7 @@ import { Globe, Database, Zap, Sparkles } from 'lucide-react';
 import { getFeatureIcon } from '../../lib/feature-icons';
 import { cn } from '@/lib/utils';
 
-export function WhatsNewModal({ isOpen, onClose, version, changes }) {
+export function WhatsNewModal({ isOpen, onClose, onDismiss, version, changes }) {
   const FeatureCard = ({ feature, index }) => {
     const IconComponent = getFeatureIcon(feature);
     
@@ -100,7 +100,20 @@ export function WhatsNewModal({ isOpen, onClose, version, changes }) {
           </div>
         </div>
 
-        <div className="flex justify-end pt-4 border-t border-slate-200 dark:border-slate-700">
+        <div className="flex justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
+          <Button
+            variant="ghost"
+            onClick={() => {
+              if (onDismiss) {
+                onDismiss();
+              }
+              onClose();
+            }}
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+          >
+            Don't show again
+          </Button>
+          
           <Button
             onClick={onClose}
             className="min-w-[120px] bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-indigo-500 dark:hover:bg-indigo-600 transition-colors duration-200"
