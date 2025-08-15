@@ -2,7 +2,7 @@
 
 All notable changes to Portracker will be documented in this file.
 
-## [1.0.6] - 2025-01-XX (Current)
+## [1.0.6] - 2025-08-15
 
 ### Frontend
 - **Container Details Drawer**: New slide-out panel to show detailed information for Docker containers including stats, labels, mounts, and environment variables
@@ -13,13 +13,13 @@ All notable changes to Portracker will be documented in this file.
 ### Backend
 - **Collector Caching**: Added caching mechanism to all data collectors to reduce duplicate requests and improve data refresh speed
 
-## [1.0.5] - 2024-XX-XX
+## [1.0.5] - 2025-08-09
 
 ### Backend
 - **Dockerode Integration**: Switched to use the dockerode library for more reliable Docker API interactions instead of shell commands
 - **Centralized Logging**: All collectors now use a single Logger class for consistent and structured logging throughout the application
 
-## [1.0.4] - 2024-XX-XX
+## [1.0.4] - 2025-08-09
 
 ### Frontend
 - **Enhanced Service Detection**: Improved identification and categorization of running services with Single Page Application (SPA) detection support
@@ -30,24 +30,24 @@ All notable changes to Portracker will be documented in this file.
 - **Advanced Port Detection**: Enhanced system for more accurate container and system port identification using multiple detection methods
 - **Improved Container Introspection**: Better error handling and fallback strategies across different platforms for reliable port collection
 
-## [1.0.3] - 2024-XX-XX
+## [1.0.3] - 2025-08-07
 
 ### Infrastructure
 - **Simplified Docker Dependencies**: Streamlined system requirements - no longer requires mounting additional system sockets for container information and support for docker proxy.
 - **Enhanced Data Accuracy**: Improved container information display with more accurate timestamps and metadata parsing
 
-## [1.0.2] - 2024-XX-XX
+## [1.0.2] - 2025-07-11
 
 ### Security & Improvements
 - **Security Hardening**: Key security aspects addressed
 - **Data Collection**: Improved data collection accuracy
 
-## [1.0.1] - 2024-XX-XX
+## [1.0.1] - 2025-07-10
 
 ### Initial Improvements
 - Various fixes and improvements after initial release
 
-## [1.0.0] - 2024-XX-XX
+## [1.0.0] - 2025-07-07
 
 ### Initial Release
 - **Multi-platform Port Tracking**: Initial release of Portracker with support for monitoring ports across multiple servers

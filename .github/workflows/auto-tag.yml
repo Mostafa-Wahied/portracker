@@ -8,12 +8,16 @@ on:
 jobs:
   auto-tag:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
       with:
         fetch-depth: 2
+        token: ${{ secrets.PAT_TOKEN || github.token }}
     
     - name: Get current version
       id: current-version
@@ -48,6 +52,8 @@ jobs:
     
     - name: Create and push tag
       if: steps.version-check.outputs.changed == 'true'
+      env:
+        GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
       run: |
         TAG="${{ steps.version-check.outputs.tag }}"
         
@@ -62,7 +68,7 @@ jobs:
         git config user.email "github-actions[bot]@users.noreply.github.com"
         
         git tag -a "$TAG" -m "Release version ${{ steps.current-version.outputs.version }}"
-        git push origin "$TAG"
+        git push https://x-access-token:$GITHUB_TOKEN@github.com/${{ github.repository }}.git "$TAG"
         
         echo "Created and pushed tag: $TAG"
     
