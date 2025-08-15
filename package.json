@@ -1,7 +1,7 @@
 {
   "name": "portracker",
   "version": "1.0.6",
-  "description": "A multi-platform port-tracking dashboard",
+  "description": "A multi-platform port-tracking dashboard for your homelab",
   "main": "backend/index.js",
   "scripts": {
     "start": "node backend/index.js",
