@@ -51,7 +51,7 @@ jobs:
         fi
     
     - name: Create and push tag
-      if: steps.version-check.outputs.changed == 'true'
+      if: steps.version-check.outputs.changed == 'true' || contains(github.event.head_commit.message, '[force tag]')
       env:
         GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || github.token }}
       run: |
