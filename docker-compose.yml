@@ -1,50 +1,108 @@
-version: '3.8'
-
 services:
   portracker:
-    build: .
-    image: portracker:latest
+    image: mostafawahied/portracker:latest
     container_name: portracker
     restart: unless-stopped
-    # network_mode: "host"
-    pid: "host"  # Access host PID namespace
     
-    cap_add:
-      - SYS_PTRACE  # For process inspection
-      - SYS_ADMIN   # For nsenter if needed
+    # Required for comprehensive system port detection
+    # This allows Portracker to see all host processes for accurate port mapping
+    pid: "host"
     
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Required: Data persistence for SQLite database
       - ./portracker-data:/data
-      - /proc:/host/proc:ro  # Mount host /proc
-      - /sys:/host/sys:ro    # Mount host /sys filesystem (optional but helpful)
+      
+      # Required: Docker socket access for container discovery
+      # Comment out if using docker-proxy setup below
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      
+      # Advanced: Host filesystem access (usually not needed with pid: "host")
+      # Uncomment only if you experience issues with port detection
+      # - /proc:/host/proc:ro
+      # - /sys/fs/cgroup:/host/sys/fs/cgroup:ro
     
     ports:
       - "${HOST_PORT:-4999}:4999"
     
     environment:
-      # CORE CONFIGURATION
+      # CORE CONFIGURATION (Required)
       - DATABASE_PATH=/data/portracker.db
       - PORT=4999
-      - NODE_ENV=production
-      - DATA_DIR=/data
-      - HOST_PROC=/host/proc  # Tell the app where to find host /proc
+      
+      # DOCKER CONFIGURATION
+      # Uncomment to use with docker-proxy for enhanced security
+      # - DOCKER_HOST=tcp://docker-proxy:2375
       
       # TRUENAS INTEGRATION (Optional)
+      # Uncomment and set your API key for enhanced TrueNAS features:
+      # - VM discovery and monitoring
+      # - Enhanced system information
+      # - TrueNAS-specific optimizations
       # - TRUENAS_API_KEY=your-api-key-here
       
-      # PERFORMANCE SETTINGS
-      - CACHE_TIMEOUT_MS=60000          # Cache duration (60 seconds)
-      - DISABLE_CACHE=false             # Set to 'true' to disable caching
-      - INCLUDE_UDP=true               # Set to 'true' to include UDP ports
+      # PERFORMANCE SETTINGS (Optional)
+      # Cache duration - increase for better performance, decrease for fresher data
+      - CACHE_TIMEOUT_MS=60000
+      # Disable caching entirely (not recommended for production)
+      # - DISABLE_CACHE=true
       
-      # DEBUGGING
-      - DEBUG=true                     # Set to 'true' for verbose logging
+      # ADVANCED PORT SCANNING (Optional)
+      # Include UDP ports in scans (may increase noise and impact performance)
+      # - INCLUDE_UDP=true
       
+      # DEVELOPMENT & DEBUGGING (Optional)
+      # Enable verbose logging for troubleshooting
+      # - DEBUG=true
     
+    # Optional: Health check for monitoring
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4999/api/health"]
       interval: 30s
       timeout: 10s
       start_period: 30s
       retries: 3
+
+  # OPTIONAL: Enhanced Security with Docker Socket Proxy
+  # Uncomment the entire section below for additional Docker socket security
+  # This adds a proxy layer between Portracker and the Docker socket
+  
+  # docker-proxy:
+  #   image: tecnativa/docker-socket-proxy:latest
+  #   container_name: portracker-docker-proxy
+  #   restart: unless-stopped
+  #   environment:
+  #     # Only allow read operations Portracker needs
+  #     - CONTAINERS=1
+  #     - IMAGES=1
+  #     - INFO=1
+  #     - NETWORKS=1
+  #     # Disable write operations for security
+  #     - POST=0
+  #     - BUILD=0
+  #     - COMMIT=0
+  #     - EXEC=0
+  #     - SWARM=0
+  #     - EVENTS=0
+  #     - VOLUMES=0
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #   ports:
+  #     - "2375:2375"
+  
+  # When using docker-proxy:
+  # 1. Uncomment the entire docker-proxy service above
+  # 2. Comment out the /var/run/docker.sock volume mount in portracker service
+  # 3. Uncomment the DOCKER_HOST environment variable in portracker service
+  # 4. Add depends_on to portracker service:
+  #    depends_on:
+  #      - docker-proxy
+
+# Optional: Custom networks for isolation
+# networks:
+#   portracker:
+#     driver: bridge
+
+# Optional: Named volumes for better data management
+# volumes:
+#   portracker-data:
+#     driver: local

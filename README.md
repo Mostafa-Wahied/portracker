@@ -26,6 +26,7 @@ By auto-discovering services on your systems, portracker provides a live, accura
 
 - **Automatic Port Discovery**: Scans the host system to find and display running services and their ports automatically. No manual data entry is needed.
 - **Platform-Specific Collectors**: Includes specialized collectors for Docker and TrueNAS to gather rich, contextual information from the host.
+- **Internal Port Detection**: Distinguishes between internal container ports and published host ports, providing complete visibility into containerized services.
 - **Lightweight & Self-Contained**: Runs as a single process with an embedded SQLite database. No external database dependencies like PostgreSQL or Redis are required.
 - **Peer-to-Peer Monitoring**: Add other `portracker` instances as peers to view all your servers, containers, and VMs from a single dashboard.
 - **Hierarchical Grouping**: Organize servers in a parent-child structure, perfect for nesting servers, e.g. a VM's `portracker` instance under its physical host.
@@ -38,24 +39,26 @@ By auto-discovering services on your systems, portracker provides a live, accura
 
 Deployment is designed to be simple using Docker.
 
-### Option 1: Docker Compose (Recommended)
+### Quick Get Started
+
+**Using Docker Compose:**
 
 Create a `docker-compose.yml` file:
 
 ```yaml
-version: "3.8"
-
 services:
   portracker:
     image: mostafawahied/portracker:latest
     container_name: portracker
     restart: unless-stopped
-    network_mode: "host"
+    pid: "host"  # Required for comprehensive port detection
     volumes:
       # Required for data persistence
       - ./portracker-data:/data
       # Required for discovering services running in Docker
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "4999:4999"
     environment:
       - DATABASE_PATH=/data/portracker.db
       - PORT=4999
@@ -69,19 +72,87 @@ Then, run the application:
 docker-compose up -d
 ```
 
-### Option 2: Docker Run
-
-For a single-line command deployment:
+**Using Docker Run:**
 
 ```sh
 docker run -d \
   --name portracker \
   --restart unless-stopped \
-  --network host \
+  --pid host \
+  -p 4999:4999 \
   -v ./portracker-data:/data \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e DATABASE_PATH=/data/portracker.db \
   -e PORT=4999 \
+  mostafawahied/portracker:latest
+```
+
+### Enhanced Security with Docker Proxy
+
+For enhanced security, you can run Portracker without direct access to the Docker socket by using a proxy. This restricts the Docker API permissions to read-only operations.
+
+**Using Docker Compose:**
+
+```yaml
+services:
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: portracker-docker-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - IMAGES=1
+      - INFO=1
+      - NETWORKS=1
+      - POST=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    ports:
+      - "2375:2375"
+
+  portracker:
+    image: mostafawahied/portracker:latest
+    container_name: portracker
+    restart: unless-stopped
+    pid: "host"
+    volumes:
+      - ./portracker-data:/data
+    ports:
+      - "4999:4999"
+    environment:
+      - DATABASE_PATH=/data/portracker.db
+      - PORT=4999
+      - DOCKER_HOST=tcp://docker-proxy:2375
+    depends_on:
+      - docker-proxy
+```
+
+**Using Docker Run:**
+
+```sh
+# Start the Docker proxy
+docker run -d \
+  --name portracker-docker-proxy \
+  --restart unless-stopped \
+  -p 2375:2375 \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  -e CONTAINERS=1 \
+  -e IMAGES=1 \
+  -e INFO=1 \
+  -e NETWORKS=1 \
+  -e POST=0 \
+  tecnativa/docker-socket-proxy:latest
+
+# Start Portracker
+docker run -d \
+  --name portracker \
+  --restart unless-stopped \
+  --pid host \
+  -p 4999:4999 \
+  -v ./portracker-data:/data \
+  -e DATABASE_PATH=/data/portracker.db \
+  -e PORT=4999 \
+  -e DOCKER_HOST=tcp://localhost:2375 \
   mostafawahied/portracker:latest
 ```
 
@@ -111,6 +182,7 @@ Configure `portracker` using environment variables.
 
 Future development is focused on improving the application based on community feedback. Key areas include:
 
+- Adding user authentication.
 - Expanding the library of platform-specific collectors for other host systems.
 - Addressing bugs and incorporating requested changes from the community.
 

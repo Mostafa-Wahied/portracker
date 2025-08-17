@@ -57,17 +57,13 @@ validate-*.sh
 
 # Docker
 .dockerignore
-
-# Development documentation and process files
-
-# Test results and API testing artifacts
-backend/api-tests/
-backend/api-docs/
-
-# GitHub instructions (development process)
-.github/instructions/
-backend/api-tests/truenas/test-results/
-
-
-docker-compose-personal.yml
+docker-compose-*.yml
+docker-compose.*.yml
+*docker-compose.dev.yml
+.docker-compose-*.yml
+docker-compose.override.yml
+docker-compose.local.yml
+docker-compose.personal.yml
+.github/instructions
+backend/docker-compose.dev.yml
 backend/Dockerfile.dev
