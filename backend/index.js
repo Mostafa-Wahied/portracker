@@ -800,6 +800,7 @@ app.get("/api/servers/:id/scan", async (req, res) => {
           }
 
           const peerScanData = await peerResponse.json();
+          
           logger.debug(`Peer scan complete: ${server.label} (${serverId})`);
           return res.json(peerScanData);
         } catch (fetchError) {
@@ -966,6 +967,66 @@ function validateServerIdParam(req, res, next) {
         field: "id",
       });
   }
+  next();
+}
+
+/**
+ * Middleware that validates input for custom service name operations.
+ * Validates server_id, host_ip, host_port, custom_name, and container_id fields.
+ */
+function validateCustomServiceNameInput(req, res, next) {
+  const { server_id, host_ip, host_port, custom_name, container_id } = req.body;
+
+  if (!server_id || typeof server_id !== "string" || server_id.trim().length === 0) {
+    return res
+      .status(400)
+      .json({
+        error: "Validation failed",
+        details: "server_id is required and must be a non-empty string",
+        field: "server_id",
+      });
+  }
+
+  if (!host_ip || typeof host_ip !== "string" || host_ip.trim().length === 0) {
+    return res
+      .status(400)
+      .json({
+        error: "Validation failed",
+        details: "host_ip is required and must be a non-empty string",
+        field: "host_ip",
+      });
+  }
+
+  if (host_port == null || !Number.isInteger(host_port) || host_port <= 0 || host_port > 65535) {
+    return res
+      .status(400)
+      .json({
+        error: "Validation failed",
+        details: "host_port is required and must be a valid port number (1-65535)",
+        field: "host_port",
+      });
+  }
+
+  if (custom_name != null && (typeof custom_name !== "string" || custom_name.trim().length === 0)) {
+    return res
+      .status(400)
+      .json({
+        error: "Validation failed",
+        details: "custom_name must be a non-empty string when provided",
+        field: "custom_name",
+      });
+  }
+
+  if (container_id != null && (typeof container_id !== "string" || container_id.trim().length === 0)) {
+    return res
+      .status(400)
+      .json({
+        error: "Validation failed",
+        details: "container_id must be a non-empty string when provided",
+        field: "container_id",
+      });
+  }
+
   next();
 }
 
@@ -1305,6 +1366,315 @@ app.get("/api/ignores", (req, res) => {
       });
   } finally {
 
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+  }
+});
+
+app.post("/api/custom-service-names", validateCustomServiceNameInput, (req, res) => {
+  const { server_id, host_ip, host_port, custom_name, original_name, container_id } = req.body;
+  const currentDebug = req.query.debug === "true";
+
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`POST /api/custom-service-names for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}. Custom name: "${custom_name}"`);
+
+  try {
+    const existing = db
+      .prepare(
+        "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+      )
+      .get(server_id, host_ip, host_port, container_id || null, container_id || null);
+
+    if (existing) {
+      db.prepare(
+        "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+      ).run(custom_name, original_name || null, server_id, host_ip, host_port, container_id || null, container_id || null);
+      logger.info(`Custom service name updated for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+    } else {
+      db.prepare(
+        "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(server_id, host_ip, host_port, container_id || null, custom_name, original_name || null);
+      logger.info(`Custom service name created for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+    }
+
+    if (!container_id && host_ip === "0.0.0.0") {
+      const ipv6Existing = db
+        .prepare(
+          "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL"
+        )
+        .get(server_id, host_port);
+
+      if (ipv6Existing) {
+        db.prepare(
+          "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL"
+        ).run(custom_name, original_name || null, server_id, host_port);
+        logger.info(`Custom service name updated for ${server_id} [::]:${host_port} (IPv6 variant)`);
+      } else {
+        try {
+          db.prepare(
+            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, '::',  ?, ?, ?, ?)"
+          ).run(server_id, host_port, null, custom_name, original_name || null);
+          logger.info(`Custom service name created for ${server_id} [::]:${host_port} (IPv6 variant)`);
+        } catch (insertError) {
+          logger.debug(`Could not create IPv6 variant for ${server_id} [::]:${host_port}: ${insertError.message}`);
+        }
+      }
+    } else if (!container_id && host_ip === "::") {
+      const ipv4Existing = db
+        .prepare(
+          "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL"
+        )
+        .get(server_id, host_port);
+
+      if (ipv4Existing) {
+        db.prepare(
+          "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL"
+        ).run(custom_name, original_name || null, server_id, host_port);
+        logger.info(`Custom service name updated for ${server_id} 0.0.0.0:${host_port} (IPv4 variant)`);
+      } else {
+        try {
+          db.prepare(
+            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, '0.0.0.0', ?, ?, ?, ?)"
+          ).run(server_id, host_port, null, custom_name, original_name || null);
+          logger.info(`Custom service name created for ${server_id} 0.0.0.0:${host_port} (IPv4 variant)`);
+        } catch (insertError) {
+          logger.debug(`Could not create IPv4 variant for ${server_id} 0.0.0.0:${host_port}: ${insertError.message}`);
+        }
+      }
+    }
+
+    responseCache.delete('endpoint:ports:local');
+
+    res.status(200).json({ success: true, message: "Custom service name saved successfully" });
+  } catch (err) {
+    logger.error(`Database error in POST /api/custom-service-names: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
+    res
+      .status(500)
+      .json({
+        error: "Database operation failed",
+        details: "Unable to save custom service name",
+      });
+  } finally {
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+  }
+});
+
+app.get("/api/custom-service-names", (req, res) => {
+  const { server_id } = req.query;
+  const currentDebug = req.query.debug === "true";
+
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`GET /api/custom-service-names for server_id: ${server_id}`);
+
+  if (!server_id) {
+    return res
+      .status(400)
+      .json({ error: "server_id query parameter is required" });
+  }
+
+  try {
+    const customNames = db
+      .prepare("SELECT host_ip, host_port, container_id, custom_name, original_name FROM custom_service_names WHERE server_id = ?")
+      .all(server_id);
+    res.json(customNames);
+  } catch (err) {
+    logger.error(`Database error in GET /api/custom-service-names: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
+    res
+      .status(500)
+      .json({
+        error: "Database operation failed",
+        details: "Unable to retrieve custom service names",
+      });
+  } finally {
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+  }
+});
+
+app.delete("/api/custom-service-names", (req, res) => {
+  const { server_id, host_ip, host_port, container_id } = req.body;
+  const currentDebug = req.query.debug === "true";
+
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`DELETE /api/custom-service-names for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+
+  if (!server_id || !host_ip || host_port == null) {
+    return res
+      .status(400)
+      .json({ error: "server_id, host_ip, and host_port are required" });
+  }
+
+  if (!Number.isInteger(host_port) || host_port <= 0 || host_port > 65535) {
+    return res
+      .status(400)
+      .json({ error: "host_port must be a valid port number (1-65535)" });
+  }
+
+  try {
+    const result = db
+      .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
+      .run(server_id, host_ip, host_port, container_id || null, container_id || null);
+
+    let deletedCount = result.changes;
+
+    if (!container_id && host_ip === "0.0.0.0") {
+      const ipv6Result = db
+        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL")
+        .run(server_id, host_port);
+      deletedCount += ipv6Result.changes;
+      if (ipv6Result.changes > 0) {
+        logger.info(`Custom service name deleted for ${server_id} [::]:${host_port} (IPv6 variant)`);
+      }
+    } else if (!container_id && host_ip === "::") {
+      const ipv4Result = db
+        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL")
+        .run(server_id, host_port);
+      deletedCount += ipv4Result.changes;
+      if (ipv4Result.changes > 0) {
+        logger.info(`Custom service name deleted for ${server_id} 0.0.0.0:${host_port} (IPv4 variant)`);
+      }
+    }
+
+    if (deletedCount > 0) {
+      logger.info(`Custom service name deleted for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+      
+      responseCache.delete('endpoint:ports:local');
+      
+      res.status(200).json({ success: true, message: "Custom service name deleted successfully" });
+    } else {
+      res.status(404).json({ error: "Custom service name not found" });
+    }
+  } catch (err) {
+    logger.error(`Database error in DELETE /api/custom-service-names: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
+    res
+      .status(500)
+      .json({
+        error: "Database operation failed",
+        details: "Unable to delete custom service name",
+      });
+  } finally {
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+  }
+});
+
+app.post("/api/custom-service-names/batch", (req, res) => {
+  const { server_id, operations } = req.body;
+  const currentDebug = req.query.debug === "true";
+
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`POST /api/custom-service-names/batch for ${server_id}. Operations: ${operations?.length || 0}`);
+
+  if (!server_id || typeof server_id !== "string" || server_id.trim().length === 0) {
+    return res
+      .status(400)
+      .json({ error: "server_id is required and must be a non-empty string" });
+  }
+
+  if (!operations || !Array.isArray(operations) || operations.length === 0) {
+    return res
+      .status(400)
+      .json({ error: "operations array is required and must not be empty" });
+  }
+
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i];
+    if (!op || typeof op !== "object") {
+      return res
+        .status(400)
+        .json({ error: `Operation at index ${i} must be an object` });
+    }
+
+    const { action, host_ip, host_port, custom_name, container_id } = op;
+
+    if (!["set", "delete"].includes(action)) {
+      return res
+        .status(400)
+        .json({ error: `Operation at index ${i}: action must be "set" or "delete"` });
+    }
+
+    if (!host_ip || typeof host_ip !== "string" || host_ip.trim().length === 0) {
+      return res
+        .status(400)
+        .json({ error: `Operation at index ${i}: host_ip is required and must be a non-empty string` });
+    }
+
+    if (host_port == null || !Number.isInteger(host_port) || host_port <= 0 || host_port > 65535) {
+      return res
+        .status(400)
+        .json({ error: `Operation at index ${i}: host_port must be a valid port number (1-65535)` });
+    }
+
+    if (action === "set" && (custom_name == null || typeof custom_name !== "string" || custom_name.trim().length === 0)) {
+      return res
+        .status(400)
+        .json({ error: `Operation at index ${i}: custom_name is required for "set" action` });
+    }
+
+    if (container_id != null && (typeof container_id !== "string" || container_id.trim().length === 0)) {
+      return res
+        .status(400)
+        .json({ error: `Operation at index ${i}: container_id must be a non-empty string when provided` });
+    }
+  }
+
+  try {
+    const results = [];
+    
+    for (const op of operations) {
+      const { action, host_ip, host_port, custom_name, original_name, container_id } = op;
+      
+      if (action === "set") {
+        const existing = db
+          .prepare(
+            "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+          )
+          .get(server_id, host_ip, host_port, container_id || null, container_id || null);
+
+        if (existing) {
+          db.prepare(
+            "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+          ).run(custom_name, original_name || null, server_id, host_ip, host_port, container_id || null, container_id || null);
+          results.push({ host_ip, host_port, container_id, action: "updated" });
+        } else {
+          db.prepare(
+            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, ?, ?, ?, ?, ?)"
+          ).run(server_id, host_ip, host_port, container_id || null, custom_name, original_name || null);
+          results.push({ host_ip, host_port, container_id, action: "created" });
+        }
+      } else if (action === "delete") {
+        const result = db
+          .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
+          .run(server_id, host_ip, host_port, container_id || null, container_id || null);
+        
+        results.push({ 
+          host_ip, 
+          host_port, 
+          container_id,
+          action: result.changes > 0 ? "deleted" : "not_found" 
+        });
+      }
+    }
+
+    logger.info(`Batch custom service name operation completed for ${server_id}. ${results.length} operations processed.`);
+    
+    responseCache.delete('endpoint:ports:local');
+    
+    res.status(200).json({ success: true, results });
+  } catch (err) {
+    logger.error(`Database error in POST /api/custom-service-names/batch: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
+    res
+      .status(500)
+      .json({
+        error: "Database operation failed",
+        details: "Unable to process batch custom service name operations",
+      });
+  } finally {
     if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }
 });

@@ -71,6 +71,22 @@ if (!tableExists) {
   );
 `);
   createIgnoresTable.run();
+
+  const createCustomServiceNamesTable = db.prepare(`
+  CREATE TABLE IF NOT EXISTS custom_service_names (
+    server_id TEXT NOT NULL,
+    host_ip TEXT NOT NULL,
+    host_port INTEGER NOT NULL,
+    container_id TEXT,
+    custom_name TEXT NOT NULL,
+    original_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (server_id, host_ip, host_port, container_id),
+    FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+  );
+`);
+  createCustomServiceNamesTable.run();
 } else {
   try {
     const notesColumns = db.prepare("PRAGMA table_info(notes)").all();
@@ -158,6 +174,62 @@ if (!tableExists) {
         ).run();
       }
     }
+
+    const customServiceNamesTableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='custom_service_names'"
+      )
+      .get();
+    
+    if (!customServiceNamesTableExists) {
+      logger.info('Schema migration: Creating "custom_service_names" table');
+      db.exec(`
+        CREATE TABLE custom_service_names (
+          server_id TEXT NOT NULL,
+          host_ip TEXT NOT NULL,
+          host_port INTEGER NOT NULL,
+          container_id TEXT,
+          custom_name TEXT NOT NULL,
+          original_name TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (server_id, host_ip, host_port, container_id),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+      `);
+    } else {
+      const customServiceNamesColumns = db.prepare("PRAGMA table_info(custom_service_names)").all();
+      if (!customServiceNamesColumns.some((col) => col.name === "container_id")) {
+        logger.info('Schema migration: Adding "container_id" column to "custom_service_names" table');
+        
+        db.exec(`
+          ALTER TABLE custom_service_names ADD COLUMN container_id TEXT;
+          
+          CREATE TABLE custom_service_names_new (
+            server_id TEXT NOT NULL,
+            host_ip TEXT NOT NULL,
+            host_port INTEGER NOT NULL,
+            container_id TEXT,
+            custom_name TEXT NOT NULL,
+            original_name TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (server_id, host_ip, host_port, container_id),
+            FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+          );
+          
+          INSERT INTO custom_service_names_new 
+          SELECT server_id, host_ip, host_port, NULL as container_id, custom_name, original_name, created_at, updated_at 
+          FROM custom_service_names;
+          
+          DROP TABLE custom_service_names;
+          ALTER TABLE custom_service_names_new RENAME TO custom_service_names;
+        `);
+        
+        logger.info('Schema migration: custom_service_names table updated with container_id support');
+      }
+    }
+
   } catch (migrationError) {
     logger.error(
       "FATAL: Database schema migration failed:",

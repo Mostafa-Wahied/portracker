@@ -138,6 +138,7 @@ export function getSearchMatches(port, searchTerm) {
   return {
     hostPort: port.host_port.toString().includes(searchLower),
     owner: port.owner && port.owner.toLowerCase().includes(searchLower),
+    customServiceName: port.customServiceName && port.customServiceName.toLowerCase().includes(searchLower),
     hostIp: port.host_ip && port.host_ip.includes(searchLower),
     target: port.target && port.target.includes && port.target.includes(searchLower),
     note: port.note && port.note.toLowerCase().includes(searchLower)

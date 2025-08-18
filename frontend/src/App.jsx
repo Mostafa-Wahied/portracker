@@ -17,9 +17,11 @@ import { Label } from "@/components/ui/label";
 import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { MultipleServerSkeleton } from "./components/server/MultipleServerSkeleton";
 import { WhatsNewModal } from "./components/ui/WhatsNewModal";
+import { ServiceRenameModal } from "./components/server/ServiceRenameModal";
 import { BarChart3 } from "lucide-react";
 import Logger from "./lib/logger";
-import { useWhatsNew } from "./lib/hooks/useWhatsNew";const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
+import { useWhatsNew } from "./lib/hooks/useWhatsNew";
+import { saveCustomServiceName, deleteCustomServiceName, getCustomServiceNames } from "./lib/api/customServiceNames";const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 
 const logger = new Logger('App');
 
@@ -35,6 +37,11 @@ export default function App() {
   const [modalSrvId, setModalSrvId] = useState("");
   const [modalPort, setModalPort] = useState(null);
   const [draftNote, setDraftNote] = useState("");
+
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renameSrvId, setRenameSrvId] = useState("");
+  const [renamePort, setRenamePort] = useState(null);
+  const [renameLoading, setRenameLoading] = useState(false);
 
   const [actionFeedback, setActionFeedback] = useState({
     copy: null,
@@ -233,7 +240,7 @@ export default function App() {
   }, []);
 
   const transformCollectorData = useCallback(
-    async (collectorData, serverId) => {
+    async (collectorData, serverId, serverUrl = null) => {
       if (!collectorData.ports || !Array.isArray(collectorData.ports)) {
         logger.warn(
           `transformCollectorData: No ports array in collectorData for serverId ${serverId}`,
@@ -284,9 +291,37 @@ export default function App() {
         }
       });
 
+      let customServiceNames = [];
+      try {
+        customServiceNames = await getCustomServiceNames(serverId, serverUrl);
+        logger.debug(`Loaded ${customServiceNames.length} custom service names for ${serverId}`);
+      } catch (error) {
+        logger.warn(`Failed to load custom service names for ${serverId}:`, error);
+      }
+
+      const customNameMap = new Map();
+      customServiceNames.forEach(item => {
+        const key = item.container_id 
+          ? `${item.host_ip}:${item.host_port}:${item.container_id}`
+          : `${item.host_ip}:${item.host_port}`;
+        customNameMap.set(key, {
+          customServiceName: item.custom_name,
+          originalServiceName: item.original_name
+        });
+      });
+
       const groupMap = new Map();
 
       uniquePorts.forEach((port) => {
+        const portKey = port.internal && port.container_id
+          ? `${port.host_ip}:${port.host_port}:${port.container_id}`
+          : `${port.host_ip}:${port.host_port}`;
+        const customNameData = customNameMap.get(portKey);
+        if (customNameData) {
+          port.customServiceName = customNameData.customServiceName;
+          port.originalServiceName = customNameData.originalServiceName;
+        }
+
         if (port.source === "docker") {
           const groupKey = port.container_id || port.app_id || port.owner;
           if (!groupMap.has(groupKey)) {
@@ -354,7 +389,8 @@ export default function App() {
                 const scanData = await scanResponse.json();
                 const transformedPorts = await transformCollectorData(
                   scanData,
-                  server.id
+                  server.id,
+                  null
                 );
                 return {
                   id: server.id,
@@ -413,7 +449,8 @@ export default function App() {
                 const scanData = await scanResponse.json();
                 const transformedPorts = await transformCollectorData(
                   scanData,
-                  server.id
+                  server.id,
+                  server.url
                 );
                 return {
                   id: server.id,
@@ -655,6 +692,12 @@ export default function App() {
     setNoteModalOpen(true);
   }, []);
 
+  const openRenameModal = useCallback((srvId, p) => {
+    setRenameSrvId(srvId);
+    setRenamePort(p);
+    setRenameModalOpen(true);
+  }, []);
+
   const saveNote = useCallback(() => {
     if (!modalPort) return;
     const originalNote = modalPort.note || "";
@@ -724,6 +767,70 @@ export default function App() {
         );
       });
   }, [modalSrvId, modalPort, draftNote, servers]);
+
+  const handleServiceRename = useCallback(async (renameData) => {
+    const { serverId, hostIp, hostPort, customName, originalName, serverUrl, isReset, containerId } = renameData;
+    
+    setRenameLoading(true);
+
+    try {
+      if (isReset || !customName) {
+        await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId);
+        
+        setGroups((currentGroups) =>
+          currentGroups.map((group) => {
+            if (group.id === serverId) {
+              const updatedData = group.data.map((port) => {
+                const matchesPort = port.host_ip === hostIp && port.host_port === hostPort;
+                const matchesContainer = containerId ? port.container_id === containerId : !port.container_id;
+                
+                if (matchesPort && matchesContainer) {
+                  return { 
+                    ...port, 
+                    customServiceName: null,
+                    originalServiceName: null
+                  };
+                }
+                return port;
+              });
+              return { ...group, data: updatedData };
+            }
+            return group;
+          })
+        );
+      } else {
+        await saveCustomServiceName(serverId, hostIp, hostPort, customName, originalName, serverUrl, containerId);
+        
+        setGroups((currentGroups) =>
+          currentGroups.map((group) => {
+            if (group.id === serverId) {
+              const updatedData = group.data.map((port) => {
+                const matchesPort = port.host_ip === hostIp && port.host_port === hostPort;
+                const matchesContainer = containerId ? port.container_id === containerId : !port.container_id;
+                
+                if (matchesPort && matchesContainer) {
+                  return { 
+                    ...port, 
+                    customServiceName: customName,
+                    originalServiceName: originalName || port.owner
+                  };
+                }
+                return port;
+              });
+              return { ...group, data: updatedData };
+            }
+            return group;
+          })
+        );
+      }
+
+      setRenameModalOpen(false);
+    } catch (error) {
+      logger.error("Error updating service name:", error);
+    } finally {
+      setRenameLoading(false);
+    }
+  }, []);
 
   const fetchServers = useCallback(() => {
     fetch("/api/servers")
@@ -818,7 +925,8 @@ export default function App() {
             const scanData = await scanResponse.json();
             const transformedPorts = await transformCollectorData(
               scanData,
-              serverData.id
+              serverData.id,
+              serverData.url
             );
 
             const finalServerData = {
@@ -923,6 +1031,7 @@ export default function App() {
       return (
         port.host_port.toString().includes(searchLower) ||
         (port.owner && port.owner.toLowerCase().includes(searchLower)) ||
+        (port.customServiceName && port.customServiceName.toLowerCase().includes(searchLower)) ||
         (port.host_ip && port.host_ip.includes(searchLower)) ||
         port.target?.includes?.(searchLower) ||
         (port.note && port.note.toLowerCase().includes(searchLower))
@@ -951,6 +1060,7 @@ export default function App() {
         actionFeedback={actionFeedback}
         onNote={openNoteModal}
         onToggleIgnore={toggleIgnore}
+        onRename={openRenameModal}
         onCopy={(p, portProtocol) => {
           let hostForCopy;
           if (server.id === "local" &&
@@ -1167,6 +1277,16 @@ export default function App() {
 
       <WhatsNewModal
         {...getWhatsNewModalProps()}
+      />
+
+      <ServiceRenameModal
+        isOpen={renameModalOpen}
+        onClose={() => setRenameModalOpen(false)}
+        port={renamePort}
+        serverId={renameSrvId}
+        serverUrl={groups.find(g => g.id === renameSrvId)?.url}
+        onSave={handleServiceRename}
+        loading={renameLoading}
       />
     </TooltipProvider>
   );

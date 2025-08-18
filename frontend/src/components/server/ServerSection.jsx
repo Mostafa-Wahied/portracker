@@ -49,6 +49,7 @@ function ServerSectionComponent({
   actionFeedback,
   onNote,
   onToggleIgnore,
+  onRename,
   onCopy,
   serverUrl,
   platformName,
@@ -618,6 +619,7 @@ function ServerSectionComponent({
                     onCopy={onCopy}
                     onEdit={onNote}
                     onToggleIgnore={onToggleIgnore}
+                    onRename={onRename}
                     serverId={id}
                     serverUrl={serverUrl}
                     forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
@@ -648,6 +650,7 @@ function ServerSectionComponent({
                     onCopy={onCopy}
                     onEdit={onNote}
                     onToggleIgnore={onToggleIgnore}
+                    onRename={onRename}
                     serverId={id}
                     serverUrl={serverUrl}
                     forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
@@ -673,6 +676,7 @@ function ServerSectionComponent({
                     onCopy={onCopy}
                     onNote={onNote}
                     onToggleIgnore={onToggleIgnore}
+                    onRename={onRename}
                     serverId={id}
                     serverUrl={serverUrl}
                     forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
@@ -692,6 +696,7 @@ function ServerSectionComponent({
                 onCopy={onCopy}
                 onNote={onNote}
                 onToggleIgnore={onToggleIgnore}
+                onRename={onRename}
                 sortConfig={sortConfig}
                 onSort={(key) =>
                   setSortConfig((prev) => ({

@@ -15,6 +15,7 @@ export function PortTable({
   onCopy,
   onNote,
   onToggleIgnore,
+  onRename,
   sortConfig,
   onSort,
   deepLinkContainerId,
@@ -119,6 +120,7 @@ export function PortTable({
               onCopy={onCopy}
               onNote={onNote}
               onToggleIgnore={onToggleIgnore}
+              onRename={onRename}
               forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
               notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
               notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}

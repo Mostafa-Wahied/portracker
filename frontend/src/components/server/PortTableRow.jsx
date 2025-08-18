@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink, Lock } from "lucide-react";
+import { ExternalLink, Lock, Tag } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { ActionButton } from "./ActionButton";
 import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
@@ -34,6 +35,10 @@ const renderHighlightedText = (content) => {
   );
 };
 
+const getDisplayServiceName = (port) => {
+  return port.customServiceName || port.owner || "Unknown Service";
+};
+
 function PortTableRowComponent({
   port,
   serverId,
@@ -43,6 +48,7 @@ function PortTableRowComponent({
   onCopy,
   onNote,
   onToggleIgnore,
+  onRename,
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
@@ -167,28 +173,54 @@ function PortTableRowComponent({
       <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
         <div className="flex flex-col space-y-1">
           {canShowDetails ? (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setShowDetails(true)}
-                    className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-                  >
-                    {shouldHighlight
-                      ? renderHighlightedText(highlightText(port.owner, searchTerm))
-                      : port.owner}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Open container details</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <div className="flex items-center space-x-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setShowDetails(true)}
+                      className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+                    >
+                      {shouldHighlight
+                        ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
+                        : getDisplayServiceName(port)}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Open container details</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                <ActionButton
+                  type="rename"
+                  itemKey={itemKey}
+                  actionFeedback={actionFeedback}
+                  onClick={() => onRename(serverId, port)}
+                  icon={Tag}
+                  title="Rename service"
+                  size="sm"
+                />
+              </div>
+            </div>
           ) : (
-            <span className="truncate inline-flex items-center">
-              {shouldHighlight
-                ? renderHighlightedText(highlightText(port.owner, searchTerm))
-                : port.owner}
-            </span>
+            <div className="flex items-center space-x-1">
+              <span className="truncate inline-flex items-center">
+                {shouldHighlight
+                  ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
+                  : getDisplayServiceName(port)}
+              </span>
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                <ActionButton
+                  type="rename"
+                  itemKey={itemKey}
+                  actionFeedback={actionFeedback}
+                  onClick={() => onRename(serverId, port)}
+                  icon={Tag}
+                  title="Rename service"
+                  size="sm"
+                />
+              </div>
+            </div>
           )}
           {port.note && (
             <TooltipProvider>

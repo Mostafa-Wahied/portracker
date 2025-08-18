@@ -148,7 +148,7 @@ export function useWhatsNew() {
     };
 
     initializeWhatsNew();
-  }, []);
+  }, [isDismissed]);
 
   const getModalProps = () => {
     const version = newVersions.length > 1 

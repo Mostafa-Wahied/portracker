@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink, Lock } from "lucide-react";
+import { ExternalLink, Lock, Tag } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { ActionButton } from "./ActionButton";
 import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
@@ -34,6 +35,10 @@ const renderHighlightedText = (content) => {
   );
 };
 
+const getDisplayServiceName = (port) => {
+  return port.customServiceName || port.owner || "Unknown Service";
+};
+
 function PortCardComponent({
   port,
   itemKey,
@@ -42,6 +47,7 @@ function PortCardComponent({
   onCopy,
   onEdit,
   onToggleIgnore,
+  onRename,
   serverId,
   serverUrl,
   forceOpenDetails,
@@ -157,7 +163,7 @@ function PortCardComponent({
 
         <div className="space-y-1 flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate flex items-center">
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate flex items-center space-x-1">
               {canShowDetails ? (
                 <TooltipProvider>
                   <Tooltip>
@@ -172,9 +178,9 @@ function PortCardComponent({
                       >
                         {shouldHighlight
                           ? renderHighlightedText(
-                              highlightText(port.owner, searchTerm)
+                              highlightText(getDisplayServiceName(port), searchTerm)
                             )
-                          : port.owner}
+                          : getDisplayServiceName(port)}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Open container details</TooltipContent>
@@ -184,11 +190,22 @@ function PortCardComponent({
                 <span className="truncate inline-flex items-center">
                   {shouldHighlight
                     ? renderHighlightedText(
-                        highlightText(port.owner, searchTerm)
+                        highlightText(getDisplayServiceName(port), searchTerm)
                       )
-                    : port.owner}
+                    : getDisplayServiceName(port)}
                 </span>
               )}
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                <ActionButton
+                  type="rename"
+                  itemKey={itemKey}
+                  actionFeedback={actionFeedback}
+                  onClick={() => onRename(serverId, port)}
+                  icon={Tag}
+                  title="Rename service"
+                  size="sm"
+                />
+              </div>
             </div>
           </div>
           <div className="flex items-center space-x-2 text-xs text-slate-500 dark:text-slate-400">
