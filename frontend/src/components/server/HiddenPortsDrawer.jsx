@@ -10,7 +10,6 @@ export function HiddenPortsDrawer({ hiddenPorts, onUnhide, onUnhideAll, serverId
     hiddenPorts.forEach((port) => {
       onUnhide(port);
     });
-    onUnhideAll?.(hiddenPorts);
   };
 
   return (

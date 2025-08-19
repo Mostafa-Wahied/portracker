@@ -644,7 +644,30 @@ export default function App() {
 
   const toggleIgnore = useCallback(
     (srvId, p) => {
+      console.log('[DEBUG] toggleIgnore called with:', {
+        serverId: srvId,
+        port: p.host_port,
+        hostIp: p.host_ip,
+        containerId: p.container_id,
+        internal: p.internal,
+        currentIgnored: p.ignored
+      });
+      
       const newIgnoredState = !p.ignored;
+      const portKey = generatePortKey(srvId, p);
+      const actionType = newIgnoredState ? 'hide' : 'unhide';
+      
+      // Check if operation is already in progress
+      if (actionFeedback[actionType]?.id === portKey) {
+        console.log('[DEBUG] Operation already in progress, skipping');
+        return;
+      }
+      
+      // Set loading state
+      setActionFeedback(prev => ({ 
+        ...prev, 
+        [actionType]: { id: portKey, status: 'loading' } 
+      }));
 
       setGroups((currentGroups) =>
         currentGroups.map((group) => {
@@ -692,9 +715,34 @@ export default function App() {
         .then((response) => {
           if (!response.ok)
             throw new Error("Failed to update ignore status on backend.");
+          
+          // Set success feedback
+          setActionFeedback(prev => ({ 
+            ...prev, 
+            [actionType]: { id: portKey, status: 'success' } 
+          }));
+          
+          // Clear feedback after delay
+          setTimeout(() => setActionFeedback(prev => ({ 
+            ...prev, 
+            [actionType]: null 
+          })), 2000);
         })
         .catch((error) => {
           logger.error("Error toggling ignore:", error);
+          
+          // Set error feedback
+          setActionFeedback(prev => ({ 
+            ...prev, 
+            [actionType]: { id: portKey, status: 'error' } 
+          }));
+          
+          // Clear feedback after delay
+          setTimeout(() => setActionFeedback(prev => ({ 
+            ...prev, 
+            [actionType]: null 
+          })), 3000);
+          
           setGroups((currentGroups) =>
             currentGroups.map((group) => {
               if (group.id === srvId) {
@@ -702,7 +750,8 @@ export default function App() {
                   if (
                     port.host_ip === p.host_ip &&
                     port.host_port === p.host_port &&
-                    (port.container_id || null) === (p.container_id || null)
+                    (port.container_id || null) === (p.container_id || null) &&
+                    (port.internal || false) === (p.internal || false)
                   ) {
                     return { ...port, ignored: p.ignored };
                   }
@@ -715,7 +764,7 @@ export default function App() {
           );
         });
     },
-    [servers]
+    [servers, actionFeedback, setGroups, setActionFeedback]
   );
 
   const openNoteModal = useCallback((srvId, p) => {
@@ -770,7 +819,8 @@ export default function App() {
                 if (
                   port.host_ip === modalPort.host_ip &&
                   port.host_port === modalPort.host_port &&
-                  (port.container_id || null) === (modalPort.container_id || null)
+                  (port.container_id || null) === (modalPort.container_id || null) &&
+                  (port.internal || false) === (modalPort.internal || false)
                 ) {
                   return { ...port, note: originalNote };
                 }
