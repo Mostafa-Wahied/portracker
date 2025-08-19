@@ -57,6 +57,9 @@ export function PortGridItem({
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelection,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -86,8 +89,21 @@ export function PortGridItem({
   return (
     <div
       tabIndex="0"
-      className="group relative border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 min-h-[120px] flex flex-col justify-between bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      className={`group relative border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 min-h-[120px] flex flex-col justify-between bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+        isSelected ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 shadow-md' : ''
+      }`}
     >
+      {selectionMode && (
+        <div className="absolute top-2 right-2 z-10">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.(port, serverId)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+          />
+        </div>
+      )}
+    
         <div className="flex items-start justify-between mb-3">
         <div className="flex items-center space-x-2 min-w-0 flex-1">
           <PortStatusIndicator
@@ -154,7 +170,7 @@ export function PortGridItem({
           </div>
         </div>
         
-        <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ml-2">
+        <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity ml-2">
           <PortActions
             port={port}
             itemKey={
@@ -212,7 +228,7 @@ export function PortGridItem({
                   : getDisplayServiceName(port)}
               </span>
             )}
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               <ActionButton
                 type="rename"
                 itemKey={

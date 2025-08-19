@@ -53,6 +53,9 @@ function PortCardComponent({
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelection,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -82,8 +85,21 @@ function PortCardComponent({
   return (
     <li
       tabIndex="0"
-      className="flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50"
+      className={`flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50 ${
+        isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500' : ''
+      }`}
     >
+      {selectionMode && (
+        <div className="flex items-center mr-3">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.(port, serverId)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+          />
+        </div>
+      )}
+      
       <div className="flex items-center space-x-4 flex-1 min-w-0">
         <div className="flex items-center space-x-2">
           <PortStatusIndicator
@@ -195,7 +211,7 @@ function PortCardComponent({
                     : getDisplayServiceName(port)}
                 </span>
               )}
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                 <ActionButton
                   type="rename"
                   itemKey={itemKey}
@@ -263,7 +279,7 @@ function PortCardComponent({
         </div>
       </div>
 
-      <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+      <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity">
         <PortActions
           port={port}
           itemKey={itemKey}
@@ -271,6 +287,10 @@ function PortCardComponent({
           onCopy={() => onCopy(port, protocol)}
           onEdit={() => onEdit(serverId, port)}
           onHide={() => onToggleIgnore(serverId, port)}
+          serverId={serverId}
+          selectionMode={selectionMode}
+          isSelected={isSelected}
+          onToggleSelection={onToggleSelection}
         />
       </div>
   <InternalPortDetails

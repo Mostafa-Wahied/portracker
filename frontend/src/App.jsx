@@ -18,10 +18,18 @@ import { DashboardLayout } from "./components/layout/DashboardLayout";
 import { MultipleServerSkeleton } from "./components/server/MultipleServerSkeleton";
 import { WhatsNewModal } from "./components/ui/WhatsNewModal";
 import { ServiceRenameModal } from "./components/server/ServiceRenameModal";
+import { BatchOperationsBar } from "./components/server/BatchOperationsBar";
+import { BatchRenameModal } from "./components/server/BatchRenameModal";
+import { BatchHideModal } from "./components/server/BatchHideModal";
+import { BatchNotesModal } from "./components/server/BatchNotesModal";
 import { BarChart3 } from "lucide-react";
 import Logger from "./lib/logger";
 import { useWhatsNew } from "./lib/hooks/useWhatsNew";
-import { saveCustomServiceName, deleteCustomServiceName, getCustomServiceNames } from "./lib/api/customServiceNames";const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
+import { saveCustomServiceName, deleteCustomServiceName, getCustomServiceNames, batchCustomServiceNames } from "./lib/api/customServiceNames";
+import { batchNotes } from "./lib/api/notes";
+import { generatePortKey } from "./lib/utils/portUtils";
+
+const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
 
 const logger = new Logger('App');
 
@@ -41,6 +49,11 @@ export default function App() {
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [renameSrvId, setRenameSrvId] = useState("");
   const [renamePort, setRenamePort] = useState(null);
+
+  const [batchRenameModalOpen, setBatchRenameModalOpen] = useState(false);
+  const [batchHideModalOpen, setBatchHideModalOpen] = useState(false);
+  const [batchNotesModalOpen, setBatchNotesModalOpen] = useState(false);
+  const [batchLoading, setBatchLoading] = useState(false);
   const [renameLoading, setRenameLoading] = useState(false);
 
   const [actionFeedback, setActionFeedback] = useState({
@@ -140,6 +153,9 @@ export default function App() {
   const [deepLinkContainer, setDeepLinkContainer] = useState(null);
   const [deepLinkServer, setDeepLinkServer] = useState(null);
   const [appliedDeepLink, setAppliedDeepLink] = useState(false);
+
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedPorts, setSelectedPorts] = useState(new Set());
 
   useEffect(() => {
     if (isDarkMode) {
@@ -313,10 +329,33 @@ export default function App() {
       const groupMap = new Map();
 
       uniquePorts.forEach((port) => {
-        const portKey = port.internal && port.container_id
-          ? `${port.host_ip}:${port.host_port}:${port.container_id}`
-          : `${port.host_ip}:${port.host_port}`;
-        const customNameData = customNameMap.get(portKey);
+        let customNameData = null;
+        
+        const possibleKeys = [];
+        
+        if (port.container_id) {
+          possibleKeys.push(
+            `${port.host_ip}:${port.host_port}:${port.container_id}`,
+            `0.0.0.0:${port.host_port}:${port.container_id}`,
+            `host.docker.internal:${port.host_port}:${port.container_id}`,
+            `[::]:${port.host_port}:${port.container_id}`
+          );
+        }
+        
+        possibleKeys.push(
+          `${port.host_ip}:${port.host_port}`,
+          `0.0.0.0:${port.host_port}`,
+          `host.docker.internal:${port.host_port}`,
+          `[::]:${port.host_port}`
+        );
+        
+        for (const key of possibleKeys) {
+          customNameData = customNameMap.get(key);
+          if (customNameData) {
+            break;
+          }
+        }
+        
         if (customNameData) {
           port.customServiceName = customNameData.customServiceName;
           port.originalServiceName = customNameData.originalServiceName;
@@ -624,7 +663,8 @@ export default function App() {
             const updatedData = group.data.map((port) => {
               if (
                 port.host_ip === p.host_ip &&
-                port.host_port === p.host_port
+                port.host_port === p.host_port &&
+                (port.container_id || null) === (p.container_id || null)
               ) {
                 return { ...port, ignored: newIgnoredState };
               }
@@ -654,6 +694,7 @@ export default function App() {
           server_id: isPeer ? "local" : srvId,
           host_ip: p.host_ip,
           host_port: p.host_port,
+          container_id: p.container_id || null,
           ignored: newIgnoredState,
         }),
       })
@@ -669,7 +710,8 @@ export default function App() {
                 const revertedData = group.data.map((port) => {
                   if (
                     port.host_ip === p.host_ip &&
-                    port.host_port === p.host_port
+                    port.host_port === p.host_port &&
+                    (port.container_id || null) === (p.container_id || null)
                   ) {
                     return { ...port, ignored: p.ignored };
                   }
@@ -775,7 +817,15 @@ export default function App() {
 
     try {
       if (isReset || !customName) {
-        await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId);
+        try {
+          await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId);
+        } catch (error) {
+          // If deletion fails because record doesn't exist, that's actually OK for reset
+          if (!error.message.includes('not found')) {
+            throw error; // Re-throw if it's a different error
+          }
+          logger.info('Custom service name already deleted or did not exist, proceeding with reset');
+        }
         
         setGroups((currentGroups) =>
           currentGroups.map((group) => {
@@ -831,6 +881,292 @@ export default function App() {
       setRenameLoading(false);
     }
   }, []);
+
+  const clearSelection = useCallback(() => {
+    setSelectedPorts(new Set());
+    setSelectionMode(false);
+  }, []);
+
+  const handleBatchRenameSave = useCallback(async (data) => {
+    const { customName, selectedPorts, isReset } = data;
+    setBatchLoading(true);
+
+    try {
+      const portsByServer = new Map();
+      
+      selectedPorts.forEach(portKey => {
+        const parts = portKey.split('-');
+        if (parts.length < 3) return;
+        
+        const serverId = parts[0];
+        const containerId = parts[parts.length - 1];
+        const hostPort = parts[parts.length - 2];
+        const hostIp = parts.slice(1, parts.length - 2).join('-');
+        
+        if (!portsByServer.has(serverId)) {
+          portsByServer.set(serverId, []);
+        }
+        
+        const server = groups.find(g => g.id === serverId);
+        const port = server?.data.find(p => 
+          p.host_ip === hostIp && 
+          p.host_port === parseInt(hostPort) && 
+          (p.container_id || '') === (containerId || '')
+        );
+        
+        if (port) {
+          portsByServer.get(serverId).push({
+            action: isReset ? "delete" : "set",
+            host_ip: hostIp,
+            host_port: parseInt(hostPort),
+            custom_name: isReset ? null : customName,
+            original_name: port.originalServiceName || port.owner,
+            container_id: containerId || null,
+          });
+          
+          if (!port.internal) {
+            const relatedPorts = server.data.filter(p => 
+              p.host_port === parseInt(hostPort) && 
+              p.owner === port.owner &&
+              (p.container_id || '') === (containerId || '') &&
+              p.host_ip !== hostIp &&
+              !p.internal
+            );
+            
+            relatedPorts.forEach(relatedPort => {
+              portsByServer.get(serverId).push({
+                action: isReset ? "delete" : "set",
+                host_ip: relatedPort.host_ip,
+                host_port: parseInt(hostPort),
+                custom_name: isReset ? null : customName,
+                original_name: relatedPort.originalServiceName || relatedPort.owner,
+                container_id: containerId || null,
+              });
+            });
+          }
+        }
+      });
+
+      const serverUrl = groups.find(g => g.id !== 'local')?.serverUrl;
+      
+      for (const [serverId, operations] of portsByServer) {
+        await batchCustomServiceNames(serverId, operations, serverUrl);
+      }
+
+      setGroups((currentGroups) =>
+        currentGroups.map((group) => {
+          const serverPorts = portsByServer.get(group.id);
+          if (!serverPorts) return group;
+          
+          const updatedData = group.data.map((port) => {
+            const operation = serverPorts.find(op => 
+              op.host_ip === port.host_ip && 
+              op.host_port === port.host_port &&
+              (op.container_id || '') === (port.container_id || '')
+            );
+            
+            if (operation) {
+              return {
+                ...port,
+                customServiceName: isReset ? null : customName,
+                originalServiceName: isReset ? null : (operation.original_name || port.owner)
+              };
+            }
+            return port;
+          });
+          
+          return { ...group, data: updatedData };
+        })
+      );
+
+      setBatchRenameModalOpen(false);
+      clearSelection();
+    } catch (error) {
+      logger.error("Error updating service names:", error);
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [groups, clearSelection]);
+
+  const handleBatchHideSave = useCallback(async (data) => {
+    const { selectedPorts, action } = data;
+    setBatchLoading(true);
+
+    try {
+      const portsByServer = new Map();
+      
+      selectedPorts.forEach(portKey => {
+        const parts = portKey.split('-');
+        if (parts.length < 3) return;
+        
+        const serverId = parts[0];
+        const containerId = parts[parts.length - 1];
+        const hostPort = parts[parts.length - 2];
+        const hostIp = parts.slice(1, parts.length - 2).join('-');
+        
+        if (!portsByServer.has(serverId)) {
+          portsByServer.set(serverId, []);
+        }
+        
+        const server = groups.find(g => g.id === serverId);
+        const port = server?.data.find(p => 
+          p.host_ip === hostIp && 
+          p.host_port === parseInt(hostPort) && 
+          (p.container_id || '') === (containerId || '')
+        );
+        
+        if (port) {
+          portsByServer.get(serverId).push(port);
+        }
+      });
+
+      // Update the UI state immediately
+      setGroups((currentGroups) =>
+        currentGroups.map((group) => {
+          const serverPorts = portsByServer.get(group.id);
+          if (!serverPorts) return group;
+          
+          const updatedData = group.data.map((port) => {
+            const shouldHide = serverPorts.some(sp => 
+              sp.host_ip === port.host_ip && 
+              sp.host_port === port.host_port &&
+              (sp.container_id || '') === (port.container_id || '')
+            );
+            
+            if (shouldHide) {
+              return {
+                ...port,
+                ignored: action === 'hide'
+              };
+            }
+            return port;
+          });
+          
+          return { ...group, data: updatedData };
+        })
+      );
+
+      // Make API calls to backend
+      const promises = [];
+      for (const [serverId, serverPorts] of portsByServer) {
+        for (const port of serverPorts) {
+          let targetUrl = "/api/ignores";
+          let isPeer = false;
+
+          if (serverId !== "local") {
+            const server = servers.find((s) => s.id === serverId);
+            if (server && server.url) {
+              targetUrl = `${server.url.replace(/\/+$/, "")}/api/ignores`;
+              isPeer = true;
+            }
+          }
+
+          const promise = fetch(targetUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              server_id: isPeer ? "local" : serverId,
+              host_ip: port.host_ip,
+              host_port: port.host_port,
+              container_id: port.container_id || null,
+              ignored: action === 'hide',
+            }),
+          });
+          promises.push(promise);
+        }
+      }
+
+      // Wait for all API calls to complete
+      await Promise.all(promises);
+      
+      setBatchHideModalOpen(false);
+      clearSelection();
+    } catch (error) {
+      logger.error(`Error ${action}ing ports:`, error);
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [groups, servers, clearSelection]);
+
+  const handleBatchNotesSave = useCallback(async (data) => {
+    const { note, selectedPorts, isClear } = data;
+    setBatchLoading(true);
+
+    try {
+      const portsByServer = new Map();
+      
+      selectedPorts.forEach(portKey => {
+        const parts = portKey.split('-');
+        if (parts.length < 3) return;
+        
+        const serverId = parts[0];
+        const containerId = parts[parts.length - 1];
+        const hostPort = parts[parts.length - 2];
+        const hostIp = parts.slice(1, parts.length - 2).join('-');
+        
+        if (!portsByServer.has(serverId)) {
+          portsByServer.set(serverId, []);
+        }
+        
+        const server = groups.find(g => g.id === serverId);
+        const port = server?.data.find(p => 
+          p.host_ip === hostIp && 
+          p.host_port === parseInt(hostPort) && 
+          (p.container_id || '') === (containerId || '')
+        );
+        
+        if (port) {
+          portsByServer.get(serverId).push({
+            action: isClear ? "delete" : "set",
+            host_ip: hostIp,
+            host_port: parseInt(hostPort),
+            note: isClear ? null : note,
+            container_id: containerId || null,
+          });
+        }
+      });
+
+      const serverUrl = groups.find(g => g.id !== 'local')?.serverUrl;
+      
+      // Call backend API for each server
+      for (const [serverId, operations] of portsByServer) {
+        await batchNotes(serverId, operations, serverUrl);
+      }
+
+      // Update the UI state
+      setGroups((currentGroups) =>
+        currentGroups.map((group) => {
+          const serverPorts = portsByServer.get(group.id);
+          if (!serverPorts) return group;
+          
+          const updatedData = group.data.map((port) => {
+            const operation = serverPorts.find(op => 
+              op.host_ip === port.host_ip && 
+              op.host_port === port.host_port &&
+              (op.container_id || '') === (port.container_id || '')
+            );
+            
+            if (operation) {
+              return {
+                ...port,
+                note: isClear ? null : note
+              };
+            }
+            return port;
+          });
+          
+          return { ...group, data: updatedData };
+        })
+      );
+      
+      setBatchNotesModalOpen(false);
+      clearSelection();
+    } catch (error) {
+      logger.error("Error updating port notes:", error);
+    } finally {
+      setBatchLoading(false);
+    }
+  }, [groups, clearSelection]);
 
   const fetchServers = useCallback(() => {
     fetch("/api/servers")
@@ -1011,6 +1347,55 @@ export default function App() {
     [servers, groups, selectedServer, fetchServers]
   );
 
+  const toggleServerSelectionMode = useCallback((_serverId) => {
+    if (selectionMode) {
+      setSelectionMode(false);
+      setSelectedPorts(new Set());
+    } else {
+      setSelectionMode(true);
+    }
+  }, [selectionMode]);
+
+  const togglePortSelection = useCallback((port, serverId) => {
+    const portKey = generatePortKey(serverId, port);
+    setSelectedPorts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(portKey)) {
+        newSet.delete(portKey);
+      } else {
+        newSet.add(portKey);
+      }
+      
+      if (newSet.size === 0) {
+        setSelectionMode(false);
+      }
+      
+      return newSet;
+    });
+  }, []);
+
+  const selectAllPortsForServer = useCallback((serverId, ports) => {
+    const portKeys = ports.map(port => generatePortKey(serverId, port));
+    setSelectedPorts(prev => {
+      const newSet = new Set(prev);
+      portKeys.forEach(key => newSet.add(key));
+      return newSet;
+    });
+    setSelectionMode(true);
+  }, []);
+
+  const handleBatchRename = useCallback(() => {
+    setBatchRenameModalOpen(true);
+  }, []);
+
+  const handleBatchHide = useCallback(() => {
+    setBatchHideModalOpen(true);
+  }, []);
+
+  const handleBatchNote = useCallback(() => {
+    setBatchNotesModalOpen(true);
+  }, []);
+
   useEffect(() => {
     fetchServers();
   }, [fetchServers]);
@@ -1130,6 +1515,11 @@ export default function App() {
   deepLinkContainerId={selectedServer === server.id ? deepLinkContainer : null}
   onOpenContainerDetails={(containerId) => handleContainerOpen(server.id, containerId)}
   onCloseContainerDetails={handleContainerClose}
+  selectionMode={selectionMode}
+  selectedPorts={selectedPorts}
+  onToggleSelection={togglePortSelection}
+  onToggleServerSelectionMode={() => toggleServerSelectionMode(server.id)}
+  onSelectAllPorts={(ports) => selectAllPortsForServer(server.id, ports)}
       />
     );
   }
@@ -1287,6 +1677,64 @@ export default function App() {
         serverUrl={groups.find(g => g.id === renameSrvId)?.url}
         onSave={handleServiceRename}
         loading={renameLoading}
+      />
+
+      <BatchRenameModal
+        isOpen={batchRenameModalOpen}
+        onClose={() => setBatchRenameModalOpen(false)}
+        selectedPorts={selectedPorts}
+        onSave={handleBatchRenameSave}
+        loading={batchLoading}
+      />
+
+      <BatchHideModal
+        isOpen={batchHideModalOpen}
+        onClose={() => setBatchHideModalOpen(false)}
+        selectedPorts={selectedPorts}
+        onConfirm={handleBatchHideSave}
+        loading={batchLoading}
+        action="hide"
+      />
+
+      <BatchNotesModal
+        isOpen={batchNotesModalOpen}
+        onClose={() => setBatchNotesModalOpen(false)}
+        selectedPorts={selectedPorts}
+        onSave={handleBatchNotesSave}
+        loading={batchLoading}
+      />
+
+      <BatchOperationsBar
+        selectedCount={selectedPorts.size}
+        onBatchRename={handleBatchRename}
+        onBatchHide={handleBatchHide}
+        onBatchNote={handleBatchNote}
+        onClearSelection={clearSelection}
+        onSelectAll={() => {
+          // Only select visible ports from the currently displayed server
+          const currentGroup = selectedServer 
+            ? groups.find(g => g.id === selectedServer)
+            : null;
+          
+          if (currentGroup) {
+            const visiblePorts = filterPorts(currentGroup).data || [];
+            const portKeys = visiblePorts.map(port => 
+              generatePortKey(currentGroup.id, port)
+            );
+            setSelectedPorts(new Set(portKeys));
+            setSelectionMode(true);
+          }
+        }}
+        showSelectAll={(() => {
+          const currentGroup = selectedServer 
+            ? groups.find(g => g.id === selectedServer)
+            : null;
+          const visiblePortsCount = currentGroup 
+            ? (filterPorts(currentGroup).data?.length || 0)
+            : 0;
+          return selectedPorts.size > 0 && selectedPorts.size < visiblePortsCount;
+        })()}
+        loading={false}
       />
     </TooltipProvider>
   );

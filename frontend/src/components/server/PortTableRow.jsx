@@ -52,6 +52,9 @@ function PortTableRowComponent({
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelection,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -82,8 +85,20 @@ function PortTableRowComponent({
   return (
     <tr
       tabIndex="0"
-      className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50"
+      className={`group hover:bg-slate-50 dark:hover:bg-slate-800/50 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50 ${
+        isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500' : ''
+      }`}
     >
+      {selectionMode && (
+        <td className="px-4 py-3 text-center">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.(port, serverId)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+          />
+        </td>
+      )}
       
       <td className="px-4 py-3 text-center">
         <div className="flex justify-center">
@@ -190,7 +205,7 @@ function PortTableRowComponent({
                   <TooltipContent>Open container details</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                 <ActionButton
                   type="rename"
                   itemKey={itemKey}
@@ -209,7 +224,7 @@ function PortTableRowComponent({
                   ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
                   : getDisplayServiceName(port)}
               </span>
-              <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                 <ActionButton
                   type="rename"
                   itemKey={itemKey}
@@ -279,7 +294,7 @@ function PortTableRowComponent({
 
       
       <td className="px-4 py-3 text-right">
-        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity">
           <PortActions
             port={port}
             itemKey={itemKey}
@@ -287,6 +302,10 @@ function PortTableRowComponent({
             onCopy={() => onCopy(port, protocol)}
             onEdit={() => onNote(serverId, port)}
             onHide={() => onToggleIgnore(serverId, port)}
+            serverId={serverId}
+            selectionMode={selectionMode}
+            isSelected={isSelected}
+            onToggleSelection={onToggleSelection}
           />
         </div>
       </td>

@@ -733,14 +733,14 @@ app.get("/api/servers/:id/scan", async (req, res) => {
         const enrichedPorts = collectData.ports.map((port) => {
           const noteEntry = db
             .prepare(
-              "SELECT note FROM notes WHERE server_id = 'local' AND host_ip = ? AND host_port = ?"
+              "SELECT note FROM notes WHERE server_id = 'local' AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
             )
-            .get(port.host_ip, port.host_port);
+            .get(port.host_ip, port.host_port, port.container_id || null, port.container_id || null);
           const ignoreEntry = db
             .prepare(
-              "SELECT 1 FROM ignores WHERE server_id = 'local' AND host_ip = ? AND host_port = ?"
+              "SELECT 1 FROM ignores WHERE server_id = 'local' AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
             )
-            .get(port.host_ip, port.host_port);
+            .get(port.host_ip, port.host_port, port.container_id || null, port.container_id || null);
           return {
             ...port,
             note: noteEntry ? noteEntry.note : null,
@@ -1275,12 +1275,12 @@ app.get("/api/notes", (req, res) => {
 });
 
 app.post("/api/ignores", (req, res) => {
-  const { server_id, host_ip, host_port, ignored } = req.body;
+  const { server_id, host_ip, host_port, ignored, container_id } = req.body;
   const currentDebug = req.query.debug === "true";
 
   if (currentDebug) logger.setDebugEnabled(true);
 
-  logger.debug(`POST /api/ignores for ${server_id} ${host_ip}:${host_port}. Ignored: ${ignored}`);
+  logger.debug(`POST /api/ignores for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}. Ignored: ${ignored}`);
 
   if (
     !server_id ||
@@ -1295,30 +1295,39 @@ app.post("/api/ignores", (req, res) => {
     return res.status(400).json({ error: "Invalid input for ignore entry" });
   }
 
+  // Validate container_id if provided
+  if (container_id != null && (typeof container_id !== "string" || container_id.trim().length === 0)) {
+    return res.status(400).json({
+      error: "Invalid input for ignore entry",
+      details: "container_id must be a non-empty string when provided",
+      field: "container_id",
+    });
+  }
+
   try {
     const existing = db
       .prepare(
-        "SELECT server_id FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ?"
+        "SELECT server_id FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
       )
-      .get(server_id, host_ip, host_port);
+      .get(server_id, host_ip, host_port, container_id || null, container_id || null);
 
     if (ignored) {
       if (!existing) {
         db.prepare(
-          "INSERT INTO ignores (server_id, host_ip, host_port) VALUES (?, ?, ?)"
-        ).run(server_id, host_ip, host_port);
-        logger.info(`Port ignored for ${server_id} ${host_ip}:${host_port}`);
+          "INSERT INTO ignores (server_id, host_ip, host_port, container_id) VALUES (?, ?, ?, ?)"
+        ).run(server_id, host_ip, host_port, container_id || null);
+        logger.info(`Port ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
       } else {
-        logger.debug(`Port already ignored for ${server_id} ${host_ip}:${host_port}, no change.`);
+        logger.debug(`Port already ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}, no change.`);
       }
     } else {
       if (existing) {
         db.prepare(
-          "DELETE FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ?"
-        ).run(server_id, host_ip, host_port);
-        logger.info(`Port un-ignored for ${server_id} ${host_ip}:${host_port}`);
+          "DELETE FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+        ).run(server_id, host_ip, host_port, container_id || null, container_id || null);
+        logger.info(`Port un-ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
       } else {
-        logger.debug(`Port already not ignored for ${server_id} ${host_ip}:${host_port}, no change.`);
+        logger.debug(`Port already not ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}, no change.`);
       }
     }
     res.status(200).json({ success: true, message: "Ignore status updated" });
@@ -1352,7 +1361,7 @@ app.get("/api/ignores", (req, res) => {
 
   try {
     const ignores = db
-      .prepare("SELECT host_ip, host_port FROM ignores WHERE server_id = ?")
+      .prepare("SELECT host_ip, host_port, container_id FROM ignores WHERE server_id = ?")
       .all(server_id);
     res.json(ignores.map((item) => ({ ...item, ignored: true })));
   } catch (err) {
@@ -1520,6 +1529,18 @@ app.delete("/api/custom-service-names", (req, res) => {
 
     let deletedCount = result.changes;
 
+    // If no rows were deleted and we have a container_id, try deleting without container_id
+    // This handles legacy records that were created before container_id support
+    if (deletedCount === 0 && container_id) {
+      const legacyResult = db
+        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND container_id IS NULL")
+        .run(server_id, host_ip, host_port);
+      deletedCount += legacyResult.changes;
+      if (legacyResult.changes > 0) {
+        logger.info(`Custom service name deleted for ${server_id} ${host_ip}:${host_port} (legacy record without container_id)`);
+      }
+    }
+
     if (!container_id && host_ip === "0.0.0.0") {
       const ipv6Result = db
         .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL")
@@ -1674,6 +1695,81 @@ app.post("/api/custom-service-names/batch", (req, res) => {
         error: "Database operation failed",
         details: "Unable to process batch custom service name operations",
       });
+  } finally {
+    if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
+  }
+});
+
+// Batch notes endpoint
+app.post("/api/notes/batch", (req, res) => {
+  const { server_id, operations } = req.body;
+  const currentDebug = req.query.debug === "true";
+
+  if (currentDebug) logger.setDebugEnabled(true);
+
+  logger.debug(`POST /api/notes/batch for ${server_id}. Operations: ${operations?.length || 0}`);
+
+  if (!server_id || !Array.isArray(operations)) {
+    return res.status(400).json({ error: "server_id and operations array are required" });
+  }
+
+  try {
+    const results = [];
+
+    for (const operation of operations) {
+      const { action, host_ip, host_port, note, container_id } = operation;
+      
+      if (!action || !host_ip || host_port == null) {
+        results.push({ success: false, error: "Missing required fields: action, host_ip, host_port" });
+        continue;
+      }
+
+      if (!Number.isInteger(host_port) || host_port <= 0 || host_port > 65535) {
+        results.push({ success: false, error: "host_port must be a valid port number (1-65535)" });
+        continue;
+      }
+
+      try {
+        if (action === "set" && note) {
+          const noteTrimmed = note.trim();
+          if (noteTrimmed) {
+            const existingNote = db
+              .prepare("SELECT server_id FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
+              .get(server_id, host_ip, host_port, container_id || null, container_id || null);
+
+            if (existingNote) {
+              db.prepare("UPDATE notes SET note = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
+                .run(noteTrimmed, server_id, host_ip, host_port, container_id || null, container_id || null);
+            } else {
+              db.prepare("INSERT INTO notes (server_id, host_ip, host_port, container_id, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+                .run(server_id, host_ip, host_port, container_id || null, noteTrimmed);
+            }
+            results.push({ success: true, action: "set", host_ip, host_port, container_id });
+          }
+        } else if (action === "delete") {
+          const result = db
+            .prepare("DELETE FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
+            .run(server_id, host_ip, host_port, container_id || null, container_id || null);
+          results.push({ success: true, action: "delete", host_ip, host_port, container_id, deletedCount: result.changes });
+        }
+      } catch (opError) {
+        logger.error(`Error in batch note operation: ${opError.message}`);
+        results.push({ success: false, error: opError.message, host_ip, host_port, container_id });
+      }
+    }
+
+    responseCache.delete('endpoint:ports:local');
+    
+    logger.info(`Batch note operation completed for ${server_id}. ${results.length} operations processed.`);
+    res.status(200).json({ success: true, results });
+
+  } catch (err) {
+    logger.error(`Database error in POST /api/notes/batch: ${err.message}`);
+    logger.debug("Stack trace:", err.stack || "");
+    res.status(500).json({
+      error: "Database operation failed",
+      details: "Unable to process batch note operations",
+    });
   } finally {
     if (currentDebug) logger.setDebugEnabled(process.env.DEBUG === 'true');
   }

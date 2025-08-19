@@ -41,9 +41,11 @@ if (!tableExists) {
       server_id     TEXT NOT NULL,
       host_ip       TEXT NOT NULL,
       host_port     INTEGER NOT NULL,
+      container_id  TEXT,
       note          TEXT    NOT NULL,
       created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (server_id, host_ip, host_port),
+      updated_at    DATETIME,
+      PRIMARY KEY (server_id, host_ip, host_port, container_id),
       FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
 `);
@@ -66,7 +68,9 @@ if (!tableExists) {
     server_id TEXT NOT NULL,
     host_ip TEXT NOT NULL,
     host_port INTEGER NOT NULL,
-    PRIMARY KEY (server_id, host_ip, host_port),
+    container_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (server_id, host_ip, host_port, container_id),
     FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
   );
 `);
@@ -228,6 +232,70 @@ if (!tableExists) {
         
         logger.info('Schema migration: custom_service_names table updated with container_id support');
       }
+    }
+
+    // Check and migrate ignores table to include container_id
+    const ignoresTableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ignores'"
+      )
+      .get();
+    
+    if (ignoresTableExists) {
+      const ignoresColumns = db.prepare("PRAGMA table_info(ignores)").all();
+      if (!ignoresColumns.some((col) => col.name === "container_id")) {
+        logger.info('Schema migration: Adding "container_id" column to "ignores" table');
+        
+        db.exec(`
+          CREATE TABLE ignores_new (
+            server_id TEXT NOT NULL,
+            host_ip TEXT NOT NULL,
+            host_port INTEGER NOT NULL,
+            container_id TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (server_id, host_ip, host_port, container_id),
+            FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+          );
+          
+          INSERT INTO ignores_new (server_id, host_ip, host_port, container_id)
+          SELECT server_id, host_ip, host_port, NULL as container_id 
+          FROM ignores;
+          
+          DROP TABLE ignores;
+          ALTER TABLE ignores_new RENAME TO ignores;
+        `);
+        
+        logger.info('Schema migration: ignores table updated with container_id support');
+      }
+    }
+
+    // Check and migrate notes table to include container_id
+    const notesTableInfo = db.prepare("PRAGMA table_info(notes)").all();
+    if (!notesTableInfo.some((col) => col.name === "container_id")) {
+      logger.info('Schema migration: Adding "container_id" column to "notes" table');
+      
+      db.exec(`
+        CREATE TABLE notes_new (
+          server_id     TEXT NOT NULL,
+          host_ip       TEXT NOT NULL,
+          host_port     INTEGER NOT NULL,
+          container_id  TEXT,
+          note          TEXT    NOT NULL,
+          created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at    DATETIME,
+          PRIMARY KEY (server_id, host_ip, host_port, container_id),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+        
+        INSERT INTO notes_new (server_id, host_ip, host_port, container_id, note, created_at, updated_at)
+        SELECT server_id, host_ip, host_port, NULL as container_id, note, created_at, updated_at 
+        FROM notes;
+        
+        DROP TABLE notes;
+        ALTER TABLE notes_new RENAME TO notes;
+      `);
+      
+      logger.info('Schema migration: notes table updated with container_id support');
     }
 
   } catch (migrationError) {

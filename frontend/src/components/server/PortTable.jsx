@@ -21,6 +21,10 @@ export function PortTable({
   deepLinkContainerId,
   onOpenContainerDetails,
   onCloseContainerDetails,
+  selectionMode = false,
+  selectedPorts,
+  onToggleSelection,
+  onSelectAllPorts,
 }) {
   const getSortIcon = (column) => {
     if (sortConfig.key !== column) {
@@ -37,11 +41,48 @@ export function PortTable({
     onSort(column);
   };
 
+  const allSelected = ports.length > 0 && ports.every(port => 
+    selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)
+  );
+  
+  const someSelected = ports.some(port => 
+    selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)
+  );
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      ports.forEach(port => {
+        if (selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)) {
+          onToggleSelection?.(port, serverId);
+        }
+      });
+    } else {
+      onSelectAllPorts?.(ports);
+    }
+  };
+
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full">
         <thead className="bg-slate-50 dark:bg-slate-800/50">
           <tr>
+            {selectionMode && (
+              <th
+                scope="col"
+                className="px-4 py-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider"
+              >
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={input => {
+                    if (input) input.indeterminate = someSelected && !allSelected;
+                  }}
+                  onChange={handleSelectAll}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+                />
+              </th>
+            )}
+            
             <th
               scope="col"
               className="px-4 py-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider"
@@ -124,6 +165,9 @@ export function PortTable({
               forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
               notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
               notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
+              selectionMode={selectionMode}
+              isSelected={selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)}
+              onToggleSelection={onToggleSelection}
             />
           ))}
         </tbody>

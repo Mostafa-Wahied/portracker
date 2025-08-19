@@ -13,6 +13,7 @@ import {
   Rows,
   Info,
   Lock,
+  CheckSquare,
 } from "lucide-react";
 import { PortCard } from "./PortCard";
 import { PortGridItem } from "./PortGridItem";
@@ -21,6 +22,7 @@ import { HiddenPortsDrawer } from "./HiddenPortsDrawer";
 import { SystemInfoCard } from "./SystemInfoCard";
 import Logger from "../../lib/logger";
 import { VMsCard } from "./VMsCard";
+import { generatePortKey } from "../../lib/utils/portUtils";
 import {
   Accordion,
   AccordionContent,
@@ -66,6 +68,11 @@ function ServerSectionComponent({
   deepLinkContainerId,
   onOpenContainerDetails,
   onCloseContainerDetails,
+  selectionMode = false,
+  selectedPorts,
+  onToggleSelection,
+  onToggleServerSelectionMode,
+  onSelectAllPorts,
 }) {
   const logger = useMemo(() => new Logger('ServerSection'), []);
   
@@ -573,6 +580,27 @@ function ServerSectionComponent({
                   </Tooltip>
                 </TooltipProvider>
               </div>
+              
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={onToggleServerSelectionMode}
+                      className={`p-1.5 sm:p-2 rounded-md transition-colors ${
+                        selectionMode
+                          ? "bg-blue-100 dark:bg-blue-800/50 text-blue-700 dark:text-blue-300 shadow-sm"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-700 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600 dark:hover:text-slate-200"
+                      }`}
+                    >
+                      <CheckSquare className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {selectionMode ? "Exit selection mode" : "Select ports"}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
               {sortedPorts.length > 8 && portLayout !== "grid" && (
                 <button
                   onClick={onToggleExpanded}
@@ -598,9 +626,52 @@ function ServerSectionComponent({
         </div>
 
         {ok && visiblePorts.length > 0 && (
-          <div>
+          <div className={selectionMode ? "pb-20" : ""}>
             {portLayout === "list" && (
-              <ul className="space-y-2">
+              <>
+                {/* Select all header for non-table views */}
+                {selectionMode && (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="checkbox"
+                        checked={portsToDisplay.length > 0 && portsToDisplay.every(port => 
+                          selectedPorts?.has(generatePortKey(id, port))
+                        )}
+                        ref={input => {
+                          if (input) {
+                            const allSelected = portsToDisplay.length > 0 && portsToDisplay.every(port => 
+                              selectedPorts?.has(generatePortKey(id, port))
+                            );
+                            const someSelected = portsToDisplay.some(port => 
+                              selectedPorts?.has(generatePortKey(id, port))
+                            );
+                            input.indeterminate = someSelected && !allSelected;
+                          }
+                        }}
+                        onChange={() => {
+                          const allSelected = portsToDisplay.every(port => 
+                            selectedPorts?.has(generatePortKey(id, port))
+                          );
+                          if (allSelected) {
+                            portsToDisplay.forEach(port => {
+                              if (selectedPorts?.has(generatePortKey(id, port))) {
+                                onToggleSelection?.(port, id);
+                              }
+                            });
+                          } else {
+                            onSelectAllPorts?.(portsToDisplay);
+                          }
+                        }}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+                      />
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Select All ({portsToDisplay.length})
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <ul className="space-y-2">
                 {portsToDisplay.map((port) => (
                   <PortCard
                     key={
@@ -625,44 +696,60 @@ function ServerSectionComponent({
                     forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
                     notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
                     notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
-                  />
-                ))}
-              </ul>
-            )}
-
-            {portLayout === "card" && (
-              <ul className="space-y-2">
-                {portsToDisplay.map((port) => (
-                  <PortCard
-                    key={
-                      port.internal
-                        ? `${id}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                        : `${id}-${port.host_ip}-${port.host_port}`
-                    }
-                    port={port}
-                    itemKey={
-                      port.internal
-                        ? `${id}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                        : `${id}-${port.host_ip}-${port.host_port}`
-                    }
-                    searchTerm={searchTerm}
-                    actionFeedback={actionFeedback}
-                    onCopy={onCopy}
-                    onEdit={onNote}
-                    onToggleIgnore={onToggleIgnore}
-                    onRename={onRename}
-                    serverId={id}
-                    serverUrl={serverUrl}
-                    forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
-                    notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
-                    notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
-                  />
-                ))}
-              </ul>
+                    selectionMode={selectionMode}
+                    isSelected={selectedPorts?.has(generatePortKey(id, port))}
+                    onToggleSelection={onToggleSelection}
+                  />)
+                )}
+                </ul>
+              </>
             )}
 
             {portLayout === "grid" && (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <>
+                {/* Select all header for grid view */}
+                {selectionMode && (
+                  <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 mb-4">
+                    <div className="flex items-center space-x-3">
+                      <input
+                        type="checkbox"
+                        checked={portsToDisplay.length > 0 && portsToDisplay.every(port => 
+                          selectedPorts?.has(generatePortKey(id, port))
+                        )}
+                        ref={input => {
+                          if (input) {
+                            const allSelected = portsToDisplay.length > 0 && portsToDisplay.every(port => 
+                              selectedPorts?.has(generatePortKey(id, port))
+                            );
+                            const someSelected = portsToDisplay.some(port => 
+                              selectedPorts?.has(generatePortKey(id, port))
+                            );
+                            input.indeterminate = someSelected && !allSelected;
+                          }
+                        }}
+                        onChange={() => {
+                          const allSelected = portsToDisplay.every(port => 
+                            selectedPorts?.has(generatePortKey(id, port))
+                          );
+                          if (allSelected) {
+                            portsToDisplay.forEach(port => {
+                              if (selectedPorts?.has(generatePortKey(id, port))) {
+                                onToggleSelection?.(port, id);
+                              }
+                            });
+                          } else {
+                            onSelectAllPorts?.(portsToDisplay);
+                          }
+                        }}
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+                      />
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                        Select All ({portsToDisplay.length})
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {portsToDisplay.map((port) => (
                   <PortGridItem
                     key={
@@ -682,9 +769,13 @@ function ServerSectionComponent({
                     forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
                     notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
                     notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
+                    selectionMode={selectionMode}
+                    isSelected={selectedPorts?.has(generatePortKey(id, port))}
+                    onToggleSelection={onToggleSelection}
                   />
                 ))}
-              </div>
+                </div>
+              </>
             )}
             {portLayout === "table" && (
               <PortTable
@@ -710,6 +801,10 @@ function ServerSectionComponent({
                 deepLinkContainerId={deepLinkContainerId}
                 onOpenContainerDetails={onOpenContainerDetails}
                 onCloseContainerDetails={onCloseContainerDetails}
+                selectionMode={selectionMode}
+                selectedPorts={selectedPorts}
+                onToggleSelection={onToggleSelection}
+                onSelectAllPorts={onSelectAllPorts}
               />
             )}
 
@@ -743,6 +838,7 @@ function ServerSectionComponent({
             <HiddenPortsDrawer
               hiddenPorts={hiddenPorts}
               onUnhide={(p) => onToggleIgnore(id, p)}
+              onUnhideAll={(ports) => ports.forEach(p => onToggleIgnore(id, p))}
               serverId={id}
             />
           </div>
