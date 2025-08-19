@@ -1,6 +1,7 @@
 import { Eye, EyeOff, ChevronDown } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 export function HiddenPortsDrawer({ hiddenPorts, onUnhide, onUnhideAll, serverId }) {
   if (hiddenPorts.length === 0) return null;
@@ -40,7 +41,7 @@ export function HiddenPortsDrawer({ hiddenPorts, onUnhide, onUnhideAll, serverId
           <ul className="space-y-2">
             {hiddenPorts.map((p) => (
               <li
-                key={`${serverId}-${p.host_ip}-${p.host_port}-${p.container_id || 'no-container'}-hidden`}
+                key={generatePortKey(serverId, p)}
                 className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800/50 rounded-md"
               >
                 <div className="text-sm text-slate-700 dark:text-slate-300">

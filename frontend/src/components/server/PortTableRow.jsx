@@ -16,6 +16,7 @@ import {
   getSearchMatches,
   highlightText,
 } from "@/lib/utils";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 const renderHighlightedText = (content) => {
   if (typeof content === "string") return content;
@@ -80,7 +81,7 @@ function PortTableRowComponent({
     hostForUi = port.host_ip;
   }
 
-  const itemKey = `${serverId}-${port.host_ip}-${port.host_port}`;
+  const itemKey = generatePortKey(serverId, port);
 
   return (
     <tr

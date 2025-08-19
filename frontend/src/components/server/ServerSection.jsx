@@ -676,17 +676,9 @@ function ServerSectionComponent({
                 <ul className="space-y-2">
                 {portsToDisplay.map((port) => (
                   <PortCard
-                    key={
-                      port.internal
-                        ? `${id}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                        : `${id}-${port.host_ip}-${port.host_port}`
-                    }
+                    key={generatePortKey(id, port)}
                     port={port}
-                    itemKey={
-                      port.internal
-                        ? `${id}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                        : `${id}-${port.host_ip}-${port.host_port}`
-                    }
+                    itemKey={generatePortKey(id, port)}
                     searchTerm={searchTerm}
                     actionFeedback={actionFeedback}
                     onCopy={onCopy}
@@ -756,11 +748,7 @@ function ServerSectionComponent({
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {portsToDisplay.map((port) => (
                   <PortGridItem
-                    key={
-                      port.internal
-                        ? `${id}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                        : `${id}-${port.host_ip}-${port.host_port}`
-                    }
+                    key={generatePortKey(id, port)}
                     port={port}
                     searchTerm={searchTerm}
                     actionFeedback={actionFeedback}

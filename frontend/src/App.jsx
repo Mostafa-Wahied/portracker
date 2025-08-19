@@ -26,10 +26,10 @@ import { BarChart3 } from "lucide-react";
 import Logger from "./lib/logger";
 import { useWhatsNew } from "./lib/hooks/useWhatsNew";
 import { saveCustomServiceName, deleteCustomServiceName, getCustomServiceNames, batchCustomServiceNames } from "./lib/api/customServiceNames";
-import { batchNotes } from "./lib/api/notes";
+import { batchNotes, saveNote } from "./lib/api/notes";
 import { generatePortKey } from "./lib/utils/portUtils";
 
-const keyOf = (srvId, p) => `${srvId}-${p.host_ip}-${p.host_port}`;
+const keyOf = (srvId, p) => generatePortKey(srvId, p);
 
 const logger = new Logger('App');
 
@@ -740,7 +740,7 @@ export default function App() {
     setRenameModalOpen(true);
   }, []);
 
-  const saveNote = useCallback(() => {
+  const saveNoteModal = useCallback(() => {
     if (!modalPort) return;
     const originalNote = modalPort.note || "";
 
@@ -750,7 +750,8 @@ export default function App() {
           const updatedData = group.data.map((port) => {
             if (
               port.host_ip === modalPort.host_ip &&
-              port.host_port === modalPort.host_port
+              port.host_port === modalPort.host_port &&
+              (port.container_id || null) === (modalPort.container_id || null)
             ) {
               return { ...port, note: draftNote };
             }
@@ -763,31 +764,11 @@ export default function App() {
     );
     setNoteModalOpen(false);
 
-    let targetUrl = "/api/notes";
-    let isPeer = false;
     const currentServerIdForNote = modalSrvId;
+    const serverForNote = servers.find((s) => s.id === currentServerIdForNote);
+    const serverUrl = currentServerIdForNote !== "local" && serverForNote ? serverForNote.url : null;
 
-    if (currentServerIdForNote !== "local") {
-      const server = servers.find((s) => s.id === currentServerIdForNote);
-      if (server && server.url) {
-        targetUrl = `${server.url.replace(/\/+$/, "")}/api/notes`;
-        isPeer = true;
-      }
-    }
-
-    fetch(targetUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        server_id: isPeer ? "local" : currentServerIdForNote,
-        host_ip: modalPort.host_ip,
-        host_port: modalPort.host_port,
-        note: draftNote,
-      }),
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error("Failed to save note on backend.");
-      })
+    saveNote(currentServerIdForNote, modalPort.host_ip, modalPort.host_port, draftNote, serverUrl, modalPort.container_id)
       .catch((error) => {
         logger.error("Error saving note:", error);
         setGroups((currentGroups) =>
@@ -796,7 +777,8 @@ export default function App() {
               const revertedData = group.data.map((port) => {
                 if (
                   port.host_ip === modalPort.host_ip &&
-                  port.host_port === modalPort.host_port
+                  port.host_port === modalPort.host_port &&
+                  (port.container_id || null) === (modalPort.container_id || null)
                 ) {
                   return { ...port, note: originalNote };
                 }
@@ -1654,7 +1636,7 @@ export default function App() {
             <Button variant="outline" onClick={() => setNoteModalOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={saveNote}>Save</Button>
+            <Button onClick={saveNoteModal}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -16,6 +16,7 @@ import {
   getSearchMatches,
   highlightText,
 } from "@/lib/utils";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 const renderHighlightedText = (content) => {
   if (typeof content === "string") return content;
@@ -173,11 +174,7 @@ export function PortGridItem({
         <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity ml-2">
           <PortActions
             port={port}
-            itemKey={
-              port.internal
-                ? `${serverId}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                : `${serverId}-${port.host_ip}-${port.host_port}`
-            }
+            itemKey={generatePortKey(serverId, port)}
             actionFeedback={actionFeedback}
             onCopy={() => onCopy(port, protocol)}
             onEdit={() => onNote(serverId, port)}
@@ -231,11 +228,7 @@ export function PortGridItem({
             <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
               <ActionButton
                 type="rename"
-                itemKey={
-                  port.internal
-                    ? `${serverId}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                    : `${serverId}-${port.host_ip}-${port.host_port}`
-                }
+                itemKey={generatePortKey(serverId, port)}
                 actionFeedback={actionFeedback}
                 onClick={() => onRename(serverId, port)}
                 icon={Tag}
