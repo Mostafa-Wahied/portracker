@@ -644,26 +644,15 @@ export default function App() {
 
   const toggleIgnore = useCallback(
     (srvId, p) => {
-      console.log('[DEBUG] toggleIgnore called with:', {
-        serverId: srvId,
-        port: p.host_port,
-        hostIp: p.host_ip,
-        containerId: p.container_id,
-        internal: p.internal,
-        currentIgnored: p.ignored
-      });
       
       const newIgnoredState = !p.ignored;
       const portKey = generatePortKey(srvId, p);
       const actionType = newIgnoredState ? 'hide' : 'unhide';
       
-      // Check if operation is already in progress
       if (actionFeedback[actionType]?.id === portKey) {
-        console.log('[DEBUG] Operation already in progress, skipping');
         return;
       }
       
-      // Set loading state
       setActionFeedback(prev => ({ 
         ...prev, 
         [actionType]: { id: portKey, status: 'loading' } 
@@ -707,6 +696,7 @@ export default function App() {
           server_id: isPeer ? "local" : srvId,
           host_ip: p.host_ip,
           host_port: p.host_port,
+          protocol: p.protocol,
           container_id: p.container_id || null,
           internal: p.internal || false,
           ignored: newIgnoredState,
@@ -716,13 +706,11 @@ export default function App() {
           if (!response.ok)
             throw new Error("Failed to update ignore status on backend.");
           
-          // Set success feedback
           setActionFeedback(prev => ({ 
             ...prev, 
             [actionType]: { id: portKey, status: 'success' } 
           }));
           
-          // Clear feedback after delay
           setTimeout(() => setActionFeedback(prev => ({ 
             ...prev, 
             [actionType]: null 
@@ -731,13 +719,11 @@ export default function App() {
         .catch((error) => {
           logger.error("Error toggling ignore:", error);
           
-          // Set error feedback
           setActionFeedback(prev => ({ 
             ...prev, 
             [actionType]: { id: portKey, status: 'error' } 
           }));
           
-          // Clear feedback after delay
           setTimeout(() => setActionFeedback(prev => ({ 
             ...prev, 
             [actionType]: null 
@@ -809,7 +795,7 @@ export default function App() {
     const serverForNote = servers.find((s) => s.id === currentServerIdForNote);
     const serverUrl = currentServerIdForNote !== "local" && serverForNote ? serverForNote.url : null;
 
-    saveNote(currentServerIdForNote, modalPort.host_ip, modalPort.host_port, draftNote, serverUrl, modalPort.container_id, modalPort.internal)
+    saveNote(currentServerIdForNote, modalPort.host_ip, modalPort.host_port, modalPort.protocol, draftNote, serverUrl, modalPort.container_id, modalPort.internal)
       .catch((error) => {
         logger.error("Error saving note:", error);
         setGroups((currentGroups) =>
@@ -842,7 +828,7 @@ export default function App() {
     try {
       if (isReset || !customName) {
         try {
-          await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId, internal || false);
+          await deleteCustomServiceName(serverId, hostIp, hostPort, renameData.protocol, serverUrl, containerId, internal || false);
         } catch (error) {
           if (!error.message.includes('not found')) {
             throw error;
@@ -873,7 +859,7 @@ export default function App() {
           })
         );
       } else {
-        await saveCustomServiceName(serverId, hostIp, hostPort, customName, originalName, serverUrl, containerId, internal || false);
+        await saveCustomServiceName(serverId, hostIp, hostPort, renameData.protocol, customName, originalName, serverUrl, containerId, internal || false);
         
         setGroups((currentGroups) =>
           currentGroups.map((group) => {
@@ -949,6 +935,7 @@ export default function App() {
             action: isReset ? "delete" : "set",
             host_ip: hostIp,
             host_port: parseInt(hostPort),
+            protocol: port.protocol,
             custom_name: isReset ? null : customName,
             original_name: port.originalServiceName || port.owner,
             container_id: containerId || null,
@@ -969,6 +956,7 @@ export default function App() {
                 action: isReset ? "delete" : "set",
                 host_ip: relatedPort.host_ip,
                 host_port: parseInt(hostPort),
+                protocol: relatedPort.protocol,
                 custom_name: isReset ? null : customName,
                 original_name: relatedPort.originalServiceName || relatedPort.owner,
                 container_id: containerId || null,
@@ -994,6 +982,7 @@ export default function App() {
             const operation = serverPorts.find(op => 
               op.host_ip === port.host_ip && 
               op.host_port === port.host_port &&
+              op.protocol === port.protocol &&
               (op.container_id || '') === (port.container_id || '') &&
               (op.internal || false) === (port.internal || false)
             );
@@ -1105,8 +1094,10 @@ export default function App() {
               server_id: isPeer ? "local" : serverId,
               host_ip: port.host_ip,
               host_port: port.host_port,
+              protocol: port.protocol,
               container_id: port.container_id || null,
-              internal: port.internal || false,              ignored: action === 'hide',
+              internal: port.internal || false,
+              ignored: action === 'hide',
             }),
           });
           promises.push(promise);
@@ -1154,6 +1145,7 @@ export default function App() {
           action: isClear ? "delete" : "set",
           host_ip: matchedPort.host_ip,
           host_port: matchedPort.host_port,
+          protocol: matchedPort.protocol || "tcp",
           note: isClear ? null : note,
           container_id: matchedPort.container_id || null,
           internal: matchedPort.internal || false,
@@ -1175,6 +1167,7 @@ export default function App() {
             const operation = serverPorts.find(op => 
               op.host_ip === port.host_ip && 
               op.host_port === port.host_port &&
+              op.protocol === port.protocol &&
               (op.container_id || '') === (port.container_id || '') &&
               (op.internal || false) === (port.internal || false)
             );

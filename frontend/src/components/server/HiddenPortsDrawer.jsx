@@ -7,9 +7,7 @@ export function HiddenPortsDrawer({ hiddenPorts, onUnhide, onUnhideAll, serverId
   if (hiddenPorts.length === 0) return null;
 
   const handleUnhideAll = () => {
-    hiddenPorts.forEach((port) => {
-      onUnhide(port);
-    });
+    onUnhideAll(hiddenPorts);
   };
 
   return (
