@@ -296,9 +296,7 @@ export default function App() {
       const seenKeys = new Set();
 
       transformedPorts.forEach((port) => {
-        const key = port.internal 
-          ? `${port.container_id || port.app_id}:${port.host_port}:internal`
-          : `${port.host_ip}:${port.host_port}:${port.owner}`;      
+        const key = generatePortKey(serverId, port);
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           uniquePorts.push(port);
@@ -317,9 +315,7 @@ export default function App() {
 
       const customNameMap = new Map();
       customServiceNames.forEach(item => {
-        const key = item.container_id 
-          ? `${item.host_ip}:${item.host_port}:${item.container_id}`
-          : `${item.host_ip}:${item.host_port}`;
+        const key = `${item.host_ip}:${item.host_port}:${item.container_id || ''}:${item.internal || 0}`;
         customNameMap.set(key, {
           customServiceName: item.custom_name,
           originalServiceName: item.original_name
@@ -331,28 +327,21 @@ export default function App() {
       uniquePorts.forEach((port) => {
         let customNameData = null;
         
-        const possibleKeys = [];
+        const customNameKey = `${port.host_ip}:${port.host_port}:${port.container_id || ''}:${port.internal || false ? 1 : 0}`;
+        customNameData = customNameMap.get(customNameKey);
         
-        if (port.container_id) {
-          possibleKeys.push(
-            `${port.host_ip}:${port.host_port}:${port.container_id}`,
-            `0.0.0.0:${port.host_port}:${port.container_id}`,
-            `host.docker.internal:${port.host_port}:${port.container_id}`,
-            `[::]:${port.host_port}:${port.container_id}`
-          );
-        }
-        
-        possibleKeys.push(
-          `${port.host_ip}:${port.host_port}`,
-          `0.0.0.0:${port.host_port}`,
-          `host.docker.internal:${port.host_port}`,
-          `[::]:${port.host_port}`
-        );
-        
-        for (const key of possibleKeys) {
-          customNameData = customNameMap.get(key);
-          if (customNameData) {
-            break;
+        if (!customNameData) {
+          const fallbackKeys = [
+            `0.0.0.0:${port.host_port}:${port.container_id || ''}:${port.internal || false ? 1 : 0}`,
+            `[::]:${port.host_port}:${port.container_id || ''}:${port.internal || false ? 1 : 0}`,
+            `host.docker.internal:${port.host_port}:${port.container_id || ''}:${port.internal || false ? 1 : 0}`
+          ];
+          
+          for (const key of fallbackKeys) {
+            customNameData = customNameMap.get(key);
+            if (customNameData) {
+              break;
+            }
           }
         }
         
@@ -362,7 +351,7 @@ export default function App() {
         }
 
         if (port.source === "docker") {
-          const groupKey = port.container_id || port.app_id || port.owner;
+          const groupKey = `${port.container_id || port.app_id || port.owner}${port.internal ? '-internal' : ''}`;
           if (!groupMap.has(groupKey)) {
             groupMap.set(groupKey, []);
           }
@@ -664,7 +653,8 @@ export default function App() {
               if (
                 port.host_ip === p.host_ip &&
                 port.host_port === p.host_port &&
-                (port.container_id || null) === (p.container_id || null)
+                (port.container_id || null) === (p.container_id || null) &&
+                (port.internal || false) === (p.internal || false)
               ) {
                 return { ...port, ignored: newIgnoredState };
               }
@@ -752,7 +742,8 @@ export default function App() {
             if (
               port.host_ip === modalPort.host_ip &&
               port.host_port === modalPort.host_port &&
-              (port.container_id || null) === (modalPort.container_id || null)
+              (port.container_id || null) === (modalPort.container_id || null) &&
+              (port.internal || false) === (modalPort.internal || false)
             ) {
               return { ...port, note: draftNote };
             }
@@ -815,8 +806,9 @@ export default function App() {
               const updatedData = group.data.map((port) => {
                 const matchesPort = port.host_ip === hostIp && port.host_port === hostPort;
                 const matchesContainer = containerId ? port.container_id === containerId : !port.container_id;
+                const matchesInternal = (port.internal || false) === (internal || false);
                 
-                if (matchesPort && matchesContainer) {
+                if (matchesPort && matchesContainer && matchesInternal) {
                   return { 
                     ...port, 
                     customServiceName: null,
@@ -839,8 +831,9 @@ export default function App() {
               const updatedData = group.data.map((port) => {
                 const matchesPort = port.host_ip === hostIp && port.host_port === hostPort;
                 const matchesContainer = containerId ? port.container_id === containerId : !port.container_id;
+                const matchesInternal = (port.internal || false) === (internal || false);
                 
-                if (matchesPort && matchesContainer) {
+                if (matchesPort && matchesContainer && matchesInternal) {
                   return { 
                     ...port, 
                     customServiceName: customName,
@@ -881,9 +874,13 @@ export default function App() {
         if (parts.length < 3) return;
         
         const serverId = parts[0];
-        const containerId = parts[parts.length - 1];
-        const hostPort = parts[parts.length - 2];
-        const hostIp = parts.slice(1, parts.length - 2).join('-');
+        const isInternal = parts[parts.length - 1] === 'internal';
+        const containerIdIndex = isInternal ? parts.length - 2 : parts.length - 1;
+        const hostPortIndex = isInternal ? parts.length - 3 : parts.length - 2;
+        
+        const containerId = parts[containerIdIndex];
+        const hostPort = parts[hostPortIndex];
+        const hostIp = parts.slice(1, hostPortIndex).join('-');
         
         if (!portsByServer.has(serverId)) {
           portsByServer.set(serverId, []);
@@ -893,7 +890,8 @@ export default function App() {
         const port = server?.data.find(p => 
           p.host_ip === hostIp && 
           p.host_port === parseInt(hostPort) && 
-          (p.container_id || '') === (containerId || '')
+          (p.container_id || '') === (containerId || '') &&
+          (p.internal || false) === isInternal
         );
         
         if (port) {
@@ -904,6 +902,7 @@ export default function App() {
             custom_name: isReset ? null : customName,
             original_name: port.originalServiceName || port.owner,
             container_id: containerId || null,
+            internal: isInternal,
           });
           
           if (!port.internal) {
@@ -923,6 +922,7 @@ export default function App() {
                 custom_name: isReset ? null : customName,
                 original_name: relatedPort.originalServiceName || relatedPort.owner,
                 container_id: containerId || null,
+                internal: false,
               });
             });
           }
@@ -944,7 +944,8 @@ export default function App() {
             const operation = serverPorts.find(op => 
               op.host_ip === port.host_ip && 
               op.host_port === port.host_port &&
-              (op.container_id || '') === (port.container_id || '')
+              (op.container_id || '') === (port.container_id || '') &&
+              (op.internal || false) === (port.internal || false)
             );
             
             if (operation) {
@@ -982,9 +983,13 @@ export default function App() {
         if (parts.length < 3) return;
         
         const serverId = parts[0];
-        const containerId = parts[parts.length - 1];
-        const hostPort = parts[parts.length - 2];
-        const hostIp = parts.slice(1, parts.length - 2).join('-');
+        const isInternal = parts[parts.length - 1] === 'internal';
+        const containerIdIndex = isInternal ? parts.length - 2 : parts.length - 1;
+        const hostPortIndex = isInternal ? parts.length - 3 : parts.length - 2;
+        
+        const containerId = parts[containerIdIndex];
+        const hostPort = parts[hostPortIndex];
+        const hostIp = parts.slice(1, hostPortIndex).join('-');
         
         if (!portsByServer.has(serverId)) {
           portsByServer.set(serverId, []);
@@ -994,7 +999,8 @@ export default function App() {
         const port = server?.data.find(p => 
           p.host_ip === hostIp && 
           p.host_port === parseInt(hostPort) && 
-          (p.container_id || '') === (containerId || '')
+          (p.container_id || '') === (containerId || '') &&
+          (p.internal || false) === isInternal
         );
         
         if (port) {
@@ -1011,7 +1017,8 @@ export default function App() {
             const shouldHide = serverPorts.some(sp => 
               sp.host_ip === port.host_ip && 
               sp.host_port === port.host_port &&
-              (sp.container_id || '') === (port.container_id || '')
+              (sp.container_id || '') === (port.container_id || '') &&
+              (sp.internal || false) === (port.internal || false)
             );
             
             if (shouldHide) {
