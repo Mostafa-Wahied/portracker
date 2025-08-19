@@ -94,7 +94,7 @@ export function PortGridItem({
       }`}
     >
       {selectionMode && (
-        <div className="absolute top-2 right-2 z-10">
+        <div className="absolute top-2 left-2 z-10">
           <input
             type="checkbox"
             checked={isSelected}
@@ -105,7 +105,7 @@ export function PortGridItem({
       )}
     
         <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center space-x-2 min-w-0 flex-1">
+        <div className={`flex items-center space-x-2 min-w-0 flex-1 ${selectionMode ? 'ml-6' : ''}`}>
           <PortStatusIndicator
             serverId={serverId}
             serverUrl={serverUrl}
