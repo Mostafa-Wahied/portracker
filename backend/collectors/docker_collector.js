@@ -164,7 +164,7 @@ class DockerCollector extends BaseCollector {
 
           const dockerPorts = await this._getDockerContainerPorts();
           dockerPorts.forEach((port) => {
-            const key = `${port.host_ip}:${port.host_port}`;
+            const key = `${port.host_ip}:${port.host_port}:${port.protocol}`;
             if (!dockerPortsMap.has(key)) {
               if (port.container_id) {
                 port.created = containerCreationTimeMap.get(port.container_id) || null;
@@ -184,8 +184,8 @@ class DockerCollector extends BaseCollector {
 
             if (container.internalPorts && container.internalPorts.length > 0) {
               container.internalPorts.forEach((internalPort) => {
-                const publishedKey = `${internalPort.host_ip}:${internalPort.host_port}`;
-                const internalKey = `${internalPort.host_ip}:${internalPort.host_port}:${container.id}:internal`;
+                const publishedKey = `${internalPort.host_ip}:${internalPort.host_port}:${internalPort.protocol}`;
+                const internalKey = `${internalPort.host_ip}:${internalPort.host_port}:${internalPort.protocol}:${container.id}:internal`;
 
                 if (!dockerPortsMap.has(publishedKey) && !dockerPortsMap.has(internalKey)) {
                   internalPort.created = containerCreationTimeMap.get(container.id) || null;
@@ -344,7 +344,6 @@ class DockerCollector extends BaseCollector {
         const containerId = container.ID;
         const containerName = container.Names;
         const image = container.Image;
-
         try {
           const [inspection, pids] = await Promise.all([
             this.dockerApi.inspectContainer(containerId),
@@ -360,7 +359,7 @@ class DockerCollector extends BaseCollector {
               const [port, protocol] = portDef.split('/');
               const portNum = parseInt(port, 10);
               if (!isNaN(portNum)) {
-                internalPorts.push({
+                const internalPort = {
                   source: "docker",
                   owner: containerName,
                   protocol: protocol || "tcp",
@@ -370,7 +369,8 @@ class DockerCollector extends BaseCollector {
                   container_id: containerId,
                   app_id: containerName,
                   internal: true
-                });
+                };
+                internalPorts.push(internalPort);
               }
             });
           }
