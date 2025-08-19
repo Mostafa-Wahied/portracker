@@ -234,7 +234,6 @@ if (!tableExists) {
       }
     }
 
-    // Check and migrate ignores table to include container_id
     const ignoresTableExists = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='ignores'"
@@ -269,7 +268,6 @@ if (!tableExists) {
       }
     }
 
-    // Check and migrate notes table to include container_id
     const notesTableInfo = db.prepare("PRAGMA table_info(notes)").all();
     if (!notesTableInfo.some((col) => col.name === "container_id")) {
       logger.info('Schema migration: Adding "container_id" column to "notes" table');

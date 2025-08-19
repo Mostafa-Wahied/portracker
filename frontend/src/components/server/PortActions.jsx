@@ -9,10 +9,6 @@ export function PortActions({
   onEdit,
   onHide,
   size,
-  serverId,
-  selectionMode,
-  isSelected,
-  onToggleSelection,
 }) {
   return (
     <div className="flex items-center space-x-1">

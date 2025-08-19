@@ -629,7 +629,9 @@ function ServerSectionComponent({
           <div className={selectionMode ? "pb-20" : ""}>
             {portLayout === "list" && (
               <>
-                {/* Select all header for non-table views */}
+                {/**
+                 * Select all header for non-table views
+                 */}
                 {selectionMode && (
                   <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
                     <div className="flex items-center space-x-3">
@@ -707,7 +709,9 @@ function ServerSectionComponent({
 
             {portLayout === "grid" && (
               <>
-                {/* Select all header for grid view */}
+                {/**
+                 * Select all header for grid view
+                 */}
                 {selectionMode && (
                   <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 mb-4">
                     <div className="flex items-center space-x-3">

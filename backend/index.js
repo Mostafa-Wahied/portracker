@@ -1295,7 +1295,6 @@ app.post("/api/ignores", (req, res) => {
     return res.status(400).json({ error: "Invalid input for ignore entry" });
   }
 
-  // Validate container_id if provided
   if (container_id != null && (typeof container_id !== "string" || container_id.trim().length === 0)) {
     return res.status(400).json({
       error: "Invalid input for ignore entry",
@@ -1529,8 +1528,10 @@ app.delete("/api/custom-service-names", (req, res) => {
 
     let deletedCount = result.changes;
 
-    // If no rows were deleted and we have a container_id, try deleting without container_id
-    // This handles legacy records that were created before container_id support
+    /**
+     * If no rows were deleted and we have a container_id, try deleting without container_id
+     * This handles legacy records that were created before container_id support
+     */
     if (deletedCount === 0 && container_id) {
       const legacyResult = db
         .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND container_id IS NULL")
@@ -1700,7 +1701,6 @@ app.post("/api/custom-service-names/batch", (req, res) => {
   }
 });
 
-// Batch notes endpoint
 app.post("/api/notes/batch", (req, res) => {
   const { server_id, operations } = req.body;
   const currentDebug = req.query.debug === "true";

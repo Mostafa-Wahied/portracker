@@ -302,10 +302,6 @@ function PortTableRowComponent({
             onCopy={() => onCopy(port, protocol)}
             onEdit={() => onNote(serverId, port)}
             onHide={() => onToggleIgnore(serverId, port)}
-            serverId={serverId}
-            selectionMode={selectionMode}
-            isSelected={isSelected}
-            onToggleSelection={onToggleSelection}
           />
         </div>
       </td>

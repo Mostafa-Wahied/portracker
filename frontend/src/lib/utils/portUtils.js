@@ -9,7 +9,8 @@
  * @returns {string} Unique port key
  */
 export function generatePortKey(serverId, port) {
-  return `${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`;
+  const internalSuffix = port.internal ? '-internal' : '';
+  return `${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}${internalSuffix}`;
 }
 
 /**

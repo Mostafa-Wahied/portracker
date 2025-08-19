@@ -1,6 +1,3 @@
-// Root ESLint flat config – single place to manage all rules (backend + frontend)
-// Minimal, self-contained, and includes inline logging policy rules.
-
 const js = require('@eslint/js');
 const globals = require('globals');
 let reactHooks;
@@ -8,20 +5,16 @@ try { reactHooks = require('eslint-plugin-react-hooks'); } catch { reactHooks = 
 let reactPlugin;
 try { reactPlugin = require('eslint-plugin-react'); } catch { reactPlugin = null; }
 
-// Inline custom plugins
-// 1) `logs` – logging hygiene
-// 2) `codebase` – repo-wide style rules (comments, etc.)
 const logsPlugin = {
   rules: {
-    // Disallow any line comments beginning with // (except whitelisted directives)
     'no-line-comments': {
       meta: { type: 'problem', docs: { description: 'Disallow // line comments; use block comments or remove' } },
       create(context) {
         const allowList = [
-          /^eslint[- ]/i, // eslint directives
-          /^ts[- ]/i, // ts-ignore/expect-error (if present in mixed envs)
+          /^eslint[- ]/i,
+          /^ts[- ]/i,
           /^istanbul ignore/i,
-          /^region\b/i, // region markers if used
+          /^region\b/i,
           /^endregion\b/i,
         ];
         return {
@@ -44,12 +37,10 @@ const logsPlugin = {
         };
       },
     },
-    // Disallow emojis in any logger.* arguments
     'no-emoji-in-logs': {
       meta: { type: 'problem', docs: { description: 'Disallow emojis in log messages' } },
       create(context) {
-  // Use Extended_Pictographic to avoid false positives from variation selectors/ZWJ
-  const EMOJI_RE = /\p{Extended_Pictographic}/u;
+        const EMOJI_RE = /\p{Extended_Pictographic}/u;
         function hasEmoji(node) {
           if (!node) return false;
           if (node.type === 'Literal' && typeof node.value === 'string') return EMOJI_RE.test(node.value);
@@ -77,8 +68,7 @@ const logsPlugin = {
       },
     },
 
-    // Disallow gating info/warn behind debug checks
-  'no-debug-gated-info-warn': {
+    'no-debug-gated-info-warn': {
       meta: { type: 'problem', docs: { description: 'info/warn should not be gated by debug checks' } },
       create(context) {
         function isInfoWarnCall(node) {
@@ -160,7 +150,6 @@ const logsPlugin = {
       },
     },
 
-    // Prefer message + metadata object (soft)
     'logger-requires-metadata': {
       meta: { type: 'suggestion', docs: { description: 'Prefer passing metadata object with logs' } },
       create(context) {
@@ -190,7 +179,6 @@ const logsPlugin = {
       },
     },
 
-    // Encourage including an Error object or { err } when logging errors
     'error-object-in-logger-error': {
       meta: { type: 'suggestion', docs: { description: 'Include Error object or { err } in logger.error' } },
       create(context) {
@@ -230,8 +218,7 @@ const logsPlugin = {
       },
     },
 
-    // Avoid logging raw req/res objects and request bodies/headers
-  'no-raw-req-res-body-logging': {
+    'no-raw-req-res-body-logging': {
       meta: { type: 'suggestion', docs: { description: 'Avoid logging raw req/res or req.body/headers' } },
       create(context) {
         function isLogCall(node) {
@@ -293,8 +280,6 @@ const logsPlugin = {
 
 const codebasePlugin = {
   rules: {
-    // Disallow all line comments (// ...) except ESLint directives
-    // Rationale: keep comments to essential block docs only; use JSDoc when necessary.
     'no-line-comments-except-directives': {
       meta: { type: 'problem', docs: { description: 'Disallow // line comments except ESLint directives' } },
       create(context) {
@@ -318,7 +303,6 @@ const codebasePlugin = {
 };
 
 module.exports = [
-  // Global ignores
   { ignores: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/*.min.js', '**/*.bundle.js', 'portracker.tar', 'scripts/**'] },
 
   // Backend (Node.js, CJS)
@@ -332,9 +316,8 @@ module.exports = [
   plugins: { logs: logsPlugin, codebase: codebasePlugin },
     rules: {
       ...js.configs.recommended.rules,
-  'no-console': 'error',
-  // Eliminate warnings across the codebase (temporarily disable noisy rules)
-  'no-unused-vars': ['warn', { args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^(React|_)', caughtErrors: 'none' }],
+      'no-console': 'error',
+      'no-unused-vars': ['warn', { args: 'after-used', argsIgnorePattern: '^_', varsIgnorePattern: '^(React|_)', caughtErrors: 'none' }],
   'no-useless-escape': 'warn',
   'no-empty': ['warn', { allowEmptyCatch: true }],
   'logs/no-debug-gated-info-warn': 'warn',
@@ -344,7 +327,6 @@ module.exports = [
     },
   },
 
-  // Frontend (browser, ESM + JSX)
   {
     files: ['frontend/**/*.{js,jsx}'],
     languageOptions: {
@@ -372,10 +354,8 @@ module.exports = [
     },
   },
 
-  // Allow console in logger implementation files
   {
     files: ['backend/lib/logger.js', 'frontend/src/lib/logger.js'],
-    // Disable console rule and custom logging plugin rules so logger impls don't self-flag
     rules: {
       'no-console': 'off',
       'logs/no-emoji-in-logs': 'off',

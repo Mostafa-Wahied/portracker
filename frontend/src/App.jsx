@@ -820,9 +820,8 @@ export default function App() {
         try {
           await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId);
         } catch (error) {
-          // If deletion fails because record doesn't exist, that's actually OK for reset
           if (!error.message.includes('not found')) {
-            throw error; // Re-throw if it's a different error
+            throw error;
           }
           logger.info('Custom service name already deleted or did not exist, proceeding with reset');
         }
@@ -1020,7 +1019,6 @@ export default function App() {
         }
       });
 
-      // Update the UI state immediately
       setGroups((currentGroups) =>
         currentGroups.map((group) => {
           const serverPorts = portsByServer.get(group.id);
@@ -1046,7 +1044,6 @@ export default function App() {
         })
       );
 
-      // Make API calls to backend
       const promises = [];
       for (const [serverId, serverPorts] of portsByServer) {
         for (const port of serverPorts) {
@@ -1076,7 +1073,6 @@ export default function App() {
         }
       }
 
-      // Wait for all API calls to complete
       await Promise.all(promises);
       
       setBatchHideModalOpen(false);
@@ -1128,12 +1124,10 @@ export default function App() {
 
       const serverUrl = groups.find(g => g.id !== 'local')?.serverUrl;
       
-      // Call backend API for each server
       for (const [serverId, operations] of portsByServer) {
         await batchNotes(serverId, operations, serverUrl);
       }
 
-      // Update the UI state
       setGroups((currentGroups) =>
         currentGroups.map((group) => {
           const serverPorts = portsByServer.get(group.id);
@@ -1711,13 +1705,24 @@ export default function App() {
         onBatchNote={handleBatchNote}
         onClearSelection={clearSelection}
         onSelectAll={() => {
-          // Only select visible ports from the currently displayed server
           const currentGroup = selectedServer 
             ? groups.find(g => g.id === selectedServer)
             : null;
           
           if (currentGroup) {
-            const visiblePorts = filterPorts(currentGroup).data || [];
+            let showInternal = false;
+            try {
+              const saved = localStorage.getItem(`showInternalPorts:${currentGroup.id}`);
+              showInternal = saved ? JSON.parse(saved) : false;
+            } catch {
+              showInternal = false;
+            }
+            
+            const filteredPorts = filterPorts(currentGroup).data || [];
+            const visiblePorts = filteredPorts.filter(port => 
+              !port.ignored && (showInternal || !port.internal)
+            );
+            
             const portKeys = visiblePorts.map(port => 
               generatePortKey(currentGroup.id, port)
             );
@@ -1729,9 +1734,22 @@ export default function App() {
           const currentGroup = selectedServer 
             ? groups.find(g => g.id === selectedServer)
             : null;
-          const visiblePortsCount = currentGroup 
-            ? (filterPorts(currentGroup).data?.length || 0)
-            : 0;
+          
+          if (!currentGroup) return false;
+          
+          let showInternal = false;
+          try {
+            const saved = localStorage.getItem(`showInternalPorts:${currentGroup.id}`);
+            showInternal = saved ? JSON.parse(saved) : false;
+          } catch {
+            showInternal = false;
+          }
+          
+          const filteredPorts = filterPorts(currentGroup).data || [];
+          const visiblePortsCount = filteredPorts.filter(port => 
+            !port.ignored && (showInternal || !port.internal)
+          ).length;
+          
           return selectedPorts.size > 0 && selectedPorts.size < visiblePortsCount;
         })()}
         loading={false}

@@ -9,7 +9,6 @@ export function HiddenPortsDrawer({ hiddenPorts, onUnhide, onUnhideAll, serverId
     hiddenPorts.forEach((port) => {
       onUnhide(port);
     });
-    // Or call onUnhideAll if you want to handle it as a batch operation
     onUnhideAll?.(hiddenPorts);
   };
 
@@ -23,7 +22,9 @@ export function HiddenPortsDrawer({ hiddenPorts, onUnhide, onUnhideAll, serverId
         </summary>
         
         <div className="mt-3 pl-6 border-l border-slate-200 dark:border-slate-700 ml-2">
-          {/* Unhide all button */}
+          {/**
+           * Unhide all button
+           */}
           <div className="mb-3">
             <Button
               variant="outline"

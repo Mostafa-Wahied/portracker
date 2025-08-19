@@ -1,5 +1,6 @@
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { PortTableRow } from "./PortTableRow";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 /**
  * Renders a sortable table displaying a list of ports with associated details and actions.
@@ -42,17 +43,17 @@ export function PortTable({
   };
 
   const allSelected = ports.length > 0 && ports.every(port => 
-    selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)
+    selectedPorts?.has(generatePortKey(serverId, port))
   );
   
   const someSelected = ports.some(port => 
-    selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)
+    selectedPorts?.has(generatePortKey(serverId, port))
   );
 
   const handleSelectAll = () => {
     if (allSelected) {
       ports.forEach(port => {
-        if (selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)) {
+        if (selectedPorts?.has(generatePortKey(serverId, port))) {
           onToggleSelection?.(port, serverId);
         }
       });
@@ -166,7 +167,7 @@ export function PortTable({
               notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
               notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
               selectionMode={selectionMode}
-              isSelected={selectedPorts?.has(`${serverId}-${port.host_ip}-${port.host_port}-${port.container_id || ''}`)}
+              isSelected={selectedPorts?.has(generatePortKey(serverId, port))}
               onToggleSelection={onToggleSelection}
             />
           ))}

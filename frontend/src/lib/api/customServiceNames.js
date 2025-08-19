@@ -83,7 +83,6 @@ export async function deleteCustomServiceName(serverId, hostIp, hostPort, server
     body: JSON.stringify(body),
   });
 
-  // For reset operations, 404 (not found) should be treated as success
   if (response.status === 404) {
     return { success: true, message: "Custom service name already deleted or did not exist" };
   }

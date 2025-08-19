@@ -287,10 +287,6 @@ function PortCardComponent({
           onCopy={() => onCopy(port, protocol)}
           onEdit={() => onEdit(serverId, port)}
           onHide={() => onToggleIgnore(serverId, port)}
-          serverId={serverId}
-          selectionMode={selectionMode}
-          isSelected={isSelected}
-          onToggleSelection={onToggleSelection}
         />
       </div>
   <InternalPortDetails
