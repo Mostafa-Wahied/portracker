@@ -695,6 +695,7 @@ export default function App() {
           host_ip: p.host_ip,
           host_port: p.host_port,
           container_id: p.container_id || null,
+          internal: p.internal || false,
           ignored: newIgnoredState,
         }),
       })
@@ -768,7 +769,7 @@ export default function App() {
     const serverForNote = servers.find((s) => s.id === currentServerIdForNote);
     const serverUrl = currentServerIdForNote !== "local" && serverForNote ? serverForNote.url : null;
 
-    saveNote(currentServerIdForNote, modalPort.host_ip, modalPort.host_port, draftNote, serverUrl, modalPort.container_id)
+    saveNote(currentServerIdForNote, modalPort.host_ip, modalPort.host_port, draftNote, serverUrl, modalPort.container_id, modalPort.internal)
       .catch((error) => {
         logger.error("Error saving note:", error);
         setGroups((currentGroups) =>
@@ -793,14 +794,14 @@ export default function App() {
   }, [modalSrvId, modalPort, draftNote, servers]);
 
   const handleServiceRename = useCallback(async (renameData) => {
-    const { serverId, hostIp, hostPort, customName, originalName, serverUrl, isReset, containerId } = renameData;
+    const { serverId, hostIp, hostPort, customName, originalName, serverUrl, isReset, containerId, internal } = renameData;
     
     setRenameLoading(true);
 
     try {
       if (isReset || !customName) {
         try {
-          await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId);
+          await deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl, containerId, internal || false);
         } catch (error) {
           if (!error.message.includes('not found')) {
             throw error;
@@ -830,7 +831,7 @@ export default function App() {
           })
         );
       } else {
-        await saveCustomServiceName(serverId, hostIp, hostPort, customName, originalName, serverUrl, containerId);
+        await saveCustomServiceName(serverId, hostIp, hostPort, customName, originalName, serverUrl, containerId, internal || false);
         
         setGroups((currentGroups) =>
           currentGroups.map((group) => {
@@ -1048,7 +1049,7 @@ export default function App() {
               host_ip: port.host_ip,
               host_port: port.host_port,
               container_id: port.container_id || null,
-              ignored: action === 'hide',
+              internal: port.internal || false,              ignored: action === 'hide',
             }),
           });
           promises.push(promise);
@@ -1074,34 +1075,32 @@ export default function App() {
       const portsByServer = new Map();
       
       selectedPorts.forEach(portKey => {
-        const parts = portKey.split('-');
-        if (parts.length < 3) return;
+        let matchedPort = null;
+        let serverId = null;
         
-        const serverId = parts[0];
-        const containerId = parts[parts.length - 1];
-        const hostPort = parts[parts.length - 2];
-        const hostIp = parts.slice(1, parts.length - 2).join('-');
+        for (const group of groups) {
+          const port = group.data.find(p => generatePortKey(group.id, p) === portKey);
+          if (port) {
+            matchedPort = port;
+            serverId = group.id;
+            break;
+          }
+        }
+        
+        if (!matchedPort || !serverId) return;
         
         if (!portsByServer.has(serverId)) {
           portsByServer.set(serverId, []);
         }
         
-        const server = groups.find(g => g.id === serverId);
-        const port = server?.data.find(p => 
-          p.host_ip === hostIp && 
-          p.host_port === parseInt(hostPort) && 
-          (p.container_id || '') === (containerId || '')
-        );
-        
-        if (port) {
-          portsByServer.get(serverId).push({
-            action: isClear ? "delete" : "set",
-            host_ip: hostIp,
-            host_port: parseInt(hostPort),
-            note: isClear ? null : note,
-            container_id: containerId || null,
-          });
-        }
+        portsByServer.get(serverId).push({
+          action: isClear ? "delete" : "set",
+          host_ip: matchedPort.host_ip,
+          host_port: matchedPort.host_port,
+          note: isClear ? null : note,
+          container_id: matchedPort.container_id || null,
+          internal: matchedPort.internal || false,
+        });
       });
 
       const serverUrl = groups.find(g => g.id !== 'local')?.serverUrl;
@@ -1119,7 +1118,8 @@ export default function App() {
             const operation = serverPorts.find(op => 
               op.host_ip === port.host_ip && 
               op.host_port === port.host_port &&
-              (op.container_id || '') === (port.container_id || '')
+              (op.container_id || '') === (port.container_id || '') &&
+              (op.internal || false) === (port.internal || false)
             );
             
             if (operation) {

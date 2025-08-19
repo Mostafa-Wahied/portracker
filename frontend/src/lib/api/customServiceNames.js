@@ -12,9 +12,10 @@
  * @param {string} originalName - The original service name (for reset functionality)
  * @param {string} serverUrl - Optional server URL for peer servers
  * @param {string} containerId - Optional container ID for internal ports
+ * @param {boolean} internal - Whether this is an internal port
  * @returns {Promise<Object>} Response from the API
  */
-export async function saveCustomServiceName(serverId, hostIp, hostPort, customName, originalName, serverUrl = null, containerId = null) {
+export async function saveCustomServiceName(serverId, hostIp, hostPort, customName, originalName, serverUrl = null, containerId = null, internal = false) {
   let targetUrl = "/api/custom-service-names";
   let requestServerId = serverId;
 
@@ -29,6 +30,7 @@ export async function saveCustomServiceName(serverId, hostIp, hostPort, customNa
     host_port: hostPort,
     custom_name: customName,
     original_name: originalName,
+    internal: internal,
   };
   
   if (containerId) {
@@ -56,9 +58,10 @@ export async function saveCustomServiceName(serverId, hostIp, hostPort, customNa
  * @param {number} hostPort - The host port number
  * @param {string} serverUrl - Optional server URL for peer servers
  * @param {string} containerId - Optional container ID for internal ports
+ * @param {boolean} internal - Whether this is an internal port
  * @returns {Promise<Object>} Response from the API
  */
-export async function deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl = null, containerId = null) {
+export async function deleteCustomServiceName(serverId, hostIp, hostPort, serverUrl = null, containerId = null, internal = false) {
   let targetUrl = "/api/custom-service-names";
   let requestServerId = serverId;
 
@@ -71,6 +74,7 @@ export async function deleteCustomServiceName(serverId, hostIp, hostPort, server
     server_id: requestServerId,
     host_ip: hostIp,
     host_port: hostPort,
+    internal: internal,
   };
   
   if (containerId) {

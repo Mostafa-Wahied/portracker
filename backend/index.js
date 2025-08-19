@@ -899,7 +899,7 @@ function validateServerInput(req, res, next) {
 }
 
 function validateNoteInput(req, res, next) {
-  const { server_id, host_ip, host_port } = req.body;
+  const { server_id, host_ip, host_port, container_id, internal } = req.body;
   if (!server_id || typeof server_id !== "string") {
     return res
       .status(400)
@@ -930,6 +930,24 @@ function validateNoteInput(req, res, next) {
         details:
           "Field 'host_port' is required and must be a valid port number",
         field: "host_port",
+      });
+  }
+  if (container_id !== undefined && container_id !== null && (typeof container_id !== "string" || container_id.trim() === "")) {
+    return res
+      .status(400)
+      .json({
+        error: "Invalid input for note entry",
+        details: "container_id must be a non-empty string when provided",
+        field: "container_id",
+      });
+  }
+  if (internal !== undefined && internal !== null && typeof internal !== "boolean") {
+    return res
+      .status(400)
+      .json({
+        error: "Invalid input for note entry",
+        details: "internal must be a boolean when provided",
+        field: "internal",
       });
   }
   const serverExists = db
@@ -975,7 +993,7 @@ function validateServerIdParam(req, res, next) {
  * Validates server_id, host_ip, host_port, custom_name, and container_id fields.
  */
 function validateCustomServiceNameInput(req, res, next) {
-  const { server_id, host_ip, host_port, custom_name, container_id } = req.body;
+  const { server_id, host_ip, host_port, custom_name, container_id, internal } = req.body;
 
   if (!server_id || typeof server_id !== "string" || server_id.trim().length === 0) {
     return res
@@ -1024,6 +1042,16 @@ function validateCustomServiceNameInput(req, res, next) {
         error: "Validation failed",
         details: "container_id must be a non-empty string when provided",
         field: "container_id",
+      });
+  }
+
+  if (internal !== undefined && internal !== null && typeof internal !== "boolean") {
+    return res
+      .status(400)
+      .json({
+        error: "Validation failed",
+        details: "internal must be a boolean when provided",
+        field: "internal",
       });
   }
 
@@ -1194,37 +1222,38 @@ app.delete("/api/servers/:id", validateServerIdParam, (req, res) => {
 });
 
 app.post("/api/notes", validateNoteInput, (req, res) => {
-  const { server_id, host_ip, host_port, note } = req.body;
+  const { server_id, host_ip, host_port, note, container_id, internal } = req.body;
   const currentDebug = req.query.debug === "true";
   const noteTrimmed = note ? note.trim() : "";
+  const internalFlag = internal ? 1 : 0;
 
   if (currentDebug) logger.setDebugEnabled(true);
 
-  logger.debug(`POST /api/notes for ${server_id} ${host_ip}:${host_port}. Note: "${noteTrimmed}"`);
+  logger.debug(`POST /api/notes for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag}). Note: "${noteTrimmed}"`);
 
   try {
     const existing = db
       .prepare(
-        "SELECT server_id FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ?"
+        "SELECT server_id FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
       )
-      .get(server_id, host_ip, host_port);
+      .get(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
     if (existing) {
       if (noteTrimmed === "") {
         db.prepare(
-          "DELETE FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ?"
-        ).run(server_id, host_ip, host_port);
-        logger.info(`Note deleted for ${server_id} ${host_ip}:${host_port}`);
+          "DELETE FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
+        ).run(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
+        logger.info(`Note deleted for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
       } else {
         db.prepare(
-          "UPDATE notes SET note = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ?"
-        ).run(noteTrimmed, server_id, host_ip, host_port);
-        logger.info(`Note updated for ${server_id} ${host_ip}:${host_port}`);
+          "UPDATE notes SET note = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
+        ).run(noteTrimmed, server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
+        logger.info(`Note updated for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
       }
     } else if (noteTrimmed !== "") {
       db.prepare(
-        "INSERT INTO notes (server_id, host_ip, host_port, note) VALUES (?, ?, ?, ?)"
-      ).run(server_id, host_ip, host_port, noteTrimmed);
-      logger.info(`Note created for ${server_id} ${host_ip}:${host_port}`);
+        "INSERT INTO notes (server_id, host_ip, host_port, container_id, internal, note) VALUES (?, ?, ?, ?, ?, ?)"
+      ).run(server_id, host_ip, host_port, container_id || null, internalFlag, noteTrimmed);
+      logger.info(`Note created for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
     }
     res.status(200).json({ success: true, message: "Note saved successfully" });
   } catch (err) {
@@ -1257,7 +1286,7 @@ app.get("/api/notes", (req, res) => {
 
   try {
     const notes = db
-      .prepare("SELECT host_ip, host_port, note FROM notes WHERE server_id = ?")
+      .prepare("SELECT host_ip, host_port, container_id, internal, note FROM notes WHERE server_id = ?")
       .all(server_id);
     res.json(notes);
   } catch (err) {
@@ -1275,12 +1304,13 @@ app.get("/api/notes", (req, res) => {
 });
 
 app.post("/api/ignores", (req, res) => {
-  const { server_id, host_ip, host_port, ignored, container_id } = req.body;
+  const { server_id, host_ip, host_port, ignored, container_id, internal } = req.body;
   const currentDebug = req.query.debug === "true";
 
   if (currentDebug) logger.setDebugEnabled(true);
 
-  logger.debug(`POST /api/ignores for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}. Ignored: ${ignored}`);
+  const internalFlag = internal ? 1 : 0;
+  logger.debug(`POST /api/ignores for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag}). Ignored: ${ignored}`);
 
   if (
     !server_id ||
@@ -1303,30 +1333,38 @@ app.post("/api/ignores", (req, res) => {
     });
   }
 
+  if (internal !== undefined && internal !== null && typeof internal !== "boolean") {
+    return res.status(400).json({
+      error: "Invalid input for ignore entry",
+      details: "internal must be a boolean when provided",
+      field: "internal",
+    });
+  }
+
   try {
     const existing = db
       .prepare(
-        "SELECT server_id FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+        "SELECT server_id FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
       )
-      .get(server_id, host_ip, host_port, container_id || null, container_id || null);
+      .get(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
 
     if (ignored) {
       if (!existing) {
         db.prepare(
-          "INSERT INTO ignores (server_id, host_ip, host_port, container_id) VALUES (?, ?, ?, ?)"
-        ).run(server_id, host_ip, host_port, container_id || null);
-        logger.info(`Port ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+          "INSERT INTO ignores (server_id, host_ip, host_port, container_id, internal) VALUES (?, ?, ?, ?, ?)"
+        ).run(server_id, host_ip, host_port, container_id || null, internalFlag);
+        logger.info(`Port ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
       } else {
-        logger.debug(`Port already ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}, no change.`);
+        logger.debug(`Port already ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag}), no change.`);
       }
     } else {
       if (existing) {
         db.prepare(
-          "DELETE FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
-        ).run(server_id, host_ip, host_port, container_id || null, container_id || null);
-        logger.info(`Port un-ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+          "DELETE FROM ignores WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
+        ).run(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
+        logger.info(`Port un-ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
       } else {
-        logger.debug(`Port already not ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}, no change.`);
+        logger.debug(`Port already not ignored for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag}), no change.`);
       }
     }
     res.status(200).json({ success: true, message: "Ignore status updated" });
@@ -1360,7 +1398,7 @@ app.get("/api/ignores", (req, res) => {
 
   try {
     const ignores = db
-      .prepare("SELECT host_ip, host_port, container_id FROM ignores WHERE server_id = ?")
+      .prepare("SELECT host_ip, host_port, container_id, internal FROM ignores WHERE server_id = ?")
       .all(server_id);
     res.json(ignores.map((item) => ({ ...item, ignored: true })));
   } catch (err) {
@@ -1379,71 +1417,72 @@ app.get("/api/ignores", (req, res) => {
 });
 
 app.post("/api/custom-service-names", validateCustomServiceNameInput, (req, res) => {
-  const { server_id, host_ip, host_port, custom_name, original_name, container_id } = req.body;
+  const { server_id, host_ip, host_port, custom_name, original_name, container_id, internal } = req.body;
   const currentDebug = req.query.debug === "true";
 
   if (currentDebug) logger.setDebugEnabled(true);
 
-  logger.debug(`POST /api/custom-service-names for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}. Custom name: "${custom_name}"`);
+  const internalFlag = internal ? 1 : 0;
+  logger.debug(`POST /api/custom-service-names for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag}). Custom name: "${custom_name}"`);
 
   try {
     const existing = db
       .prepare(
-        "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
+        "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
       )
-      .get(server_id, host_ip, host_port, container_id || null, container_id || null);
+      .get(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
 
     if (existing) {
       db.prepare(
-        "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))"
-      ).run(custom_name, original_name || null, server_id, host_ip, host_port, container_id || null, container_id || null);
-      logger.info(`Custom service name updated for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+        "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?"
+      ).run(custom_name, original_name || null, server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
+      logger.info(`Custom service name updated for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
     } else {
       db.prepare(
-        "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, ?, ?, ?, ?, ?)"
-      ).run(server_id, host_ip, host_port, container_id || null, custom_name, original_name || null);
-      logger.info(`Custom service name created for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+        "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, internal, custom_name, original_name) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      ).run(server_id, host_ip, host_port, container_id || null, internalFlag, custom_name, original_name || null);
+      logger.info(`Custom service name created for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
     }
 
-    if (!container_id && host_ip === "0.0.0.0") {
+    if (!container_id && !internal && host_ip === "0.0.0.0") {
       const ipv6Existing = db
         .prepare(
-          "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL"
+          "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL AND internal = 0"
         )
         .get(server_id, host_port);
 
       if (ipv6Existing) {
         db.prepare(
-          "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL"
+          "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL AND internal = 0"
         ).run(custom_name, original_name || null, server_id, host_port);
         logger.info(`Custom service name updated for ${server_id} [::]:${host_port} (IPv6 variant)`);
       } else {
         try {
           db.prepare(
-            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, '::',  ?, ?, ?, ?)"
-          ).run(server_id, host_port, null, custom_name, original_name || null);
+            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, internal, custom_name, original_name) VALUES (?, '::',  ?, ?, ?, ?, ?)"
+          ).run(server_id, host_port, null, 0, custom_name, original_name || null);
           logger.info(`Custom service name created for ${server_id} [::]:${host_port} (IPv6 variant)`);
         } catch (insertError) {
           logger.debug(`Could not create IPv6 variant for ${server_id} [::]:${host_port}: ${insertError.message}`);
         }
       }
-    } else if (!container_id && host_ip === "::") {
+    } else if (!container_id && !internal && host_ip === "::") {
       const ipv4Existing = db
         .prepare(
-          "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL"
+          "SELECT server_id FROM custom_service_names WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL AND internal = 0"
         )
         .get(server_id, host_port);
 
       if (ipv4Existing) {
         db.prepare(
-          "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL"
+          "UPDATE custom_service_names SET custom_name = ?, original_name = ?, updated_at = datetime('now') WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL AND internal = 0"
         ).run(custom_name, original_name || null, server_id, host_port);
         logger.info(`Custom service name updated for ${server_id} 0.0.0.0:${host_port} (IPv4 variant)`);
       } else {
         try {
           db.prepare(
-            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, custom_name, original_name) VALUES (?, '0.0.0.0', ?, ?, ?, ?)"
-          ).run(server_id, host_port, null, custom_name, original_name || null);
+            "INSERT INTO custom_service_names (server_id, host_ip, host_port, container_id, internal, custom_name, original_name) VALUES (?, '0.0.0.0', ?, ?, ?, ?, ?)"
+          ).run(server_id, host_port, null, 0, custom_name, original_name || null);
           logger.info(`Custom service name created for ${server_id} 0.0.0.0:${host_port} (IPv4 variant)`);
         } catch (insertError) {
           logger.debug(`Could not create IPv4 variant for ${server_id} 0.0.0.0:${host_port}: ${insertError.message}`);
@@ -1484,7 +1523,7 @@ app.get("/api/custom-service-names", (req, res) => {
 
   try {
     const customNames = db
-      .prepare("SELECT host_ip, host_port, container_id, custom_name, original_name FROM custom_service_names WHERE server_id = ?")
+      .prepare("SELECT host_ip, host_port, container_id, internal, custom_name, original_name FROM custom_service_names WHERE server_id = ?")
       .all(server_id);
     res.json(customNames);
   } catch (err) {
@@ -1502,12 +1541,13 @@ app.get("/api/custom-service-names", (req, res) => {
 });
 
 app.delete("/api/custom-service-names", (req, res) => {
-  const { server_id, host_ip, host_port, container_id } = req.body;
+  const { server_id, host_ip, host_port, container_id, internal } = req.body;
   const currentDebug = req.query.debug === "true";
 
   if (currentDebug) logger.setDebugEnabled(true);
 
-  logger.debug(`DELETE /api/custom-service-names for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''}`);
+  const internalFlag = internal ? 1 : 0;
+  logger.debug(`DELETE /api/custom-service-names for ${server_id} ${host_ip}:${host_port}${container_id ? ` (container: ${container_id})` : ''} (internal: ${internalFlag})`);
 
   if (!server_id || !host_ip || host_port == null) {
     return res
@@ -1523,8 +1563,8 @@ app.delete("/api/custom-service-names", (req, res) => {
 
   try {
     const result = db
-      .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
-      .run(server_id, host_ip, host_port, container_id || null, container_id || null);
+      .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?")
+      .run(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
 
     let deletedCount = result.changes;
 
@@ -1542,17 +1582,17 @@ app.delete("/api/custom-service-names", (req, res) => {
       }
     }
 
-    if (!container_id && host_ip === "0.0.0.0") {
+    if (!container_id && !internal && host_ip === "0.0.0.0") {
       const ipv6Result = db
-        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL")
+        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '::' AND host_port = ? AND container_id IS NULL AND internal = 0")
         .run(server_id, host_port);
       deletedCount += ipv6Result.changes;
       if (ipv6Result.changes > 0) {
         logger.info(`Custom service name deleted for ${server_id} [::]:${host_port} (IPv6 variant)`);
       }
-    } else if (!container_id && host_ip === "::") {
+    } else if (!container_id && !internal && host_ip === "::") {
       const ipv4Result = db
-        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL")
+        .prepare("DELETE FROM custom_service_names WHERE server_id = ? AND host_ip = '0.0.0.0' AND host_port = ? AND container_id IS NULL AND internal = 0")
         .run(server_id, host_port);
       deletedCount += ipv4Result.changes;
       if (ipv4Result.changes > 0) {
@@ -1717,7 +1757,7 @@ app.post("/api/notes/batch", (req, res) => {
     const results = [];
 
     for (const operation of operations) {
-      const { action, host_ip, host_port, note, container_id } = operation;
+      const { action, host_ip, host_port, note, container_id, internal } = operation;
       
       if (!action || !host_ip || host_port == null) {
         results.push({ success: false, error: "Missing required fields: action, host_ip, host_port" });
@@ -1729,28 +1769,30 @@ app.post("/api/notes/batch", (req, res) => {
         continue;
       }
 
+      const internalFlag = internal ? 1 : 0;
+
       try {
         if (action === "set" && note) {
           const noteTrimmed = note.trim();
           if (noteTrimmed) {
             const existingNote = db
-              .prepare("SELECT server_id FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
-              .get(server_id, host_ip, host_port, container_id || null, container_id || null);
+              .prepare("SELECT server_id FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?")
+              .get(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
 
             if (existingNote) {
-              db.prepare("UPDATE notes SET note = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
-                .run(noteTrimmed, server_id, host_ip, host_port, container_id || null, container_id || null);
+              db.prepare("UPDATE notes SET note = ?, updated_at = CURRENT_TIMESTAMP WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?")
+                .run(noteTrimmed, server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
             } else {
-              db.prepare("INSERT INTO notes (server_id, host_ip, host_port, container_id, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
-                .run(server_id, host_ip, host_port, container_id || null, noteTrimmed);
+              db.prepare("INSERT INTO notes (server_id, host_ip, host_port, container_id, internal, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+                .run(server_id, host_ip, host_port, container_id || null, internalFlag, noteTrimmed);
             }
-            results.push({ success: true, action: "set", host_ip, host_port, container_id });
+            results.push({ success: true, action: "set", host_ip, host_port, container_id, internal: internalFlag });
           }
         } else if (action === "delete") {
           const result = db
-            .prepare("DELETE FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL))")
-            .run(server_id, host_ip, host_port, container_id || null, container_id || null);
-          results.push({ success: true, action: "delete", host_ip, host_port, container_id, deletedCount: result.changes });
+            .prepare("DELETE FROM notes WHERE server_id = ? AND host_ip = ? AND host_port = ? AND (container_id = ? OR (container_id IS NULL AND ? IS NULL)) AND internal = ?")
+            .run(server_id, host_ip, host_port, container_id || null, container_id || null, internalFlag);
+          results.push({ success: true, action: "delete", host_ip, host_port, container_id, internal: internalFlag, deletedCount: result.changes });
         }
       } catch (opError) {
         logger.error(`Error in batch note operation: ${opError.message}`);

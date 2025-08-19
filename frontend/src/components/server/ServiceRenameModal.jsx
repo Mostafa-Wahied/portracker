@@ -53,6 +53,7 @@ export function ServiceRenameModal({
       originalName: port.originalServiceName || port.owner,
       serverUrl,
       containerId: port.container_id,
+      internal: port.internal || false,
     });
   };
 
@@ -68,6 +69,7 @@ export function ServiceRenameModal({
       serverUrl,
       isReset: true,
       containerId: port.container_id,
+      internal: port.internal || false,
     });
   };
 

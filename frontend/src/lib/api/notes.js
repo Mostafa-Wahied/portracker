@@ -11,9 +11,10 @@
  * @param {string} note - The note content
  * @param {string} serverUrl - Optional server URL for peer servers
  * @param {string} containerId - Optional container ID for internal ports
+ * @param {boolean} internal - Whether this is an internal port
  * @returns {Promise<Object>} Response from the API
  */
-export async function saveNote(serverId, hostIp, hostPort, note, serverUrl = null, containerId = null) {
+export async function saveNote(serverId, hostIp, hostPort, note, serverUrl = null, containerId = null, internal = false) {
   let targetUrl = "/api/notes";
   let requestServerId = serverId;
 
@@ -27,6 +28,7 @@ export async function saveNote(serverId, hostIp, hostPort, note, serverUrl = nul
     host_ip: hostIp,
     host_port: hostPort,
     note: note,
+    internal: internal,
   };
   
   if (containerId) {
