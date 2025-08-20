@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink, Lock } from "lucide-react";
+import { ExternalLink, Lock, Tag } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { ActionButton } from "./ActionButton";
 import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
@@ -34,6 +35,10 @@ const renderHighlightedText = (content) => {
   );
 };
 
+const getDisplayServiceName = (port) => {
+  return port.customServiceName || port.owner || "Unknown Service";
+};
+
 function PortCardComponent({
   port,
   itemKey,
@@ -42,11 +47,15 @@ function PortCardComponent({
   onCopy,
   onEdit,
   onToggleIgnore,
+  onRename,
   serverId,
   serverUrl,
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelection,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -76,8 +85,21 @@ function PortCardComponent({
   return (
     <li
       tabIndex="0"
-      className="flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50"
+      className={`flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50 ${
+        isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500' : ''
+      }`}
     >
+      {selectionMode && (
+        <div className="flex items-center mr-3">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.(port, serverId)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+          />
+        </div>
+      )}
+      
       <div className="flex items-center space-x-4 flex-1 min-w-0">
         <div className="flex items-center space-x-2">
           <PortStatusIndicator
@@ -157,7 +179,7 @@ function PortCardComponent({
 
         <div className="space-y-1 flex-1 min-w-0">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate flex items-center">
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate flex items-center space-x-1">
               {canShowDetails ? (
                 <TooltipProvider>
                   <Tooltip>
@@ -172,9 +194,9 @@ function PortCardComponent({
                       >
                         {shouldHighlight
                           ? renderHighlightedText(
-                              highlightText(port.owner, searchTerm)
+                              highlightText(getDisplayServiceName(port), searchTerm)
                             )
-                          : port.owner}
+                          : getDisplayServiceName(port)}
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>Open container details</TooltipContent>
@@ -184,11 +206,22 @@ function PortCardComponent({
                 <span className="truncate inline-flex items-center">
                   {shouldHighlight
                     ? renderHighlightedText(
-                        highlightText(port.owner, searchTerm)
+                        highlightText(getDisplayServiceName(port), searchTerm)
                       )
-                    : port.owner}
+                    : getDisplayServiceName(port)}
                 </span>
               )}
+              <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                <ActionButton
+                  type="rename"
+                  itemKey={itemKey}
+                  actionFeedback={actionFeedback}
+                  onClick={() => onRename(serverId, port)}
+                  icon={Tag}
+                  title="Rename service"
+                  size="sm"
+                />
+              </div>
             </div>
           </div>
           <div className="flex items-center space-x-2 text-xs text-slate-500 dark:text-slate-400">
@@ -246,7 +279,7 @@ function PortCardComponent({
         </div>
       </div>
 
-      <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+      <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity">
         <PortActions
           port={port}
           itemKey={itemKey}

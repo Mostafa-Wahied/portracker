@@ -41,9 +41,13 @@ if (!tableExists) {
       server_id     TEXT NOT NULL,
       host_ip       TEXT NOT NULL,
       host_port     INTEGER NOT NULL,
+      protocol      TEXT NOT NULL DEFAULT 'tcp',
+      container_id  TEXT,
+      internal      INTEGER DEFAULT 0,
       note          TEXT    NOT NULL,
       created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (server_id, host_ip, host_port),
+      updated_at    DATETIME,
+      PRIMARY KEY (server_id, host_ip, host_port, protocol, container_id, internal),
       FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
     );
 `);
@@ -66,11 +70,33 @@ if (!tableExists) {
     server_id TEXT NOT NULL,
     host_ip TEXT NOT NULL,
     host_port INTEGER NOT NULL,
-    PRIMARY KEY (server_id, host_ip, host_port),
+    protocol TEXT NOT NULL DEFAULT 'tcp',
+    container_id TEXT,
+    internal INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (server_id, host_ip, host_port, protocol, container_id, internal),
     FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
   );
 `);
   createIgnoresTable.run();
+
+  const createCustomServiceNamesTable = db.prepare(`
+  CREATE TABLE IF NOT EXISTS custom_service_names (
+    server_id TEXT NOT NULL,
+    host_ip TEXT NOT NULL,
+    host_port INTEGER NOT NULL,
+    protocol TEXT NOT NULL DEFAULT 'tcp',
+    container_id TEXT,
+    internal INTEGER DEFAULT 0,
+    custom_name TEXT NOT NULL,
+    original_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (server_id, host_ip, host_port, protocol, container_id, internal),
+    FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+  );
+`);
+  createCustomServiceNamesTable.run();
 } else {
   try {
     const notesColumns = db.prepare("PRAGMA table_info(notes)").all();
@@ -158,6 +184,296 @@ if (!tableExists) {
         ).run();
       }
     }
+
+    const customServiceNamesTableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='custom_service_names'"
+      )
+      .get();
+    
+    if (!customServiceNamesTableExists) {
+      logger.info('Schema migration: Creating "custom_service_names" table');
+      db.exec(`
+        CREATE TABLE custom_service_names (
+          server_id TEXT NOT NULL,
+          host_ip TEXT NOT NULL,
+          host_port INTEGER NOT NULL,
+          container_id TEXT,
+          internal INTEGER DEFAULT 0,
+          custom_name TEXT NOT NULL,
+          original_name TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+      `);
+    } else {
+      const customServiceNamesColumns = db.prepare("PRAGMA table_info(custom_service_names)").all();
+      if (!customServiceNamesColumns.some((col) => col.name === "container_id")) {
+        logger.info('Schema migration: Adding "container_id" column to "custom_service_names" table');
+        
+        db.exec(`
+          ALTER TABLE custom_service_names ADD COLUMN container_id TEXT;
+          
+          CREATE TABLE custom_service_names_new (
+            server_id TEXT NOT NULL,
+            host_ip TEXT NOT NULL,
+            host_port INTEGER NOT NULL,
+            container_id TEXT,
+            internal INTEGER DEFAULT 0,
+            custom_name TEXT NOT NULL,
+            original_name TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+            FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+          );
+          
+          INSERT INTO custom_service_names_new 
+          SELECT server_id, host_ip, host_port, NULL as container_id, 0 as internal, custom_name, original_name, created_at, updated_at 
+          FROM custom_service_names;
+          
+          DROP TABLE custom_service_names;
+          ALTER TABLE custom_service_names_new RENAME TO custom_service_names;
+        `);
+        
+        logger.info('Schema migration: custom_service_names table updated with container_id and internal support');
+      } else if (!customServiceNamesColumns.some((col) => col.name === "internal")) {
+        logger.info('Schema migration: Adding "internal" column to "custom_service_names" table');
+        
+        db.exec(`
+          CREATE TABLE custom_service_names_new (
+            server_id TEXT NOT NULL,
+            host_ip TEXT NOT NULL,
+            host_port INTEGER NOT NULL,
+            container_id TEXT,
+            internal INTEGER DEFAULT 0,
+            custom_name TEXT NOT NULL,
+            original_name TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+            FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+          );
+          
+          INSERT INTO custom_service_names_new 
+          SELECT server_id, host_ip, host_port, container_id, 0 as internal, custom_name, original_name, created_at, updated_at 
+          FROM custom_service_names;
+          
+          DROP TABLE custom_service_names;
+          ALTER TABLE custom_service_names_new RENAME TO custom_service_names;
+        `);
+        
+        logger.info('Schema migration: custom_service_names table updated with internal support');
+      }
+    }
+
+    const ignoresTableExists = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='ignores'"
+      )
+      .get();
+    
+    if (ignoresTableExists) {
+      const ignoresColumns = db.prepare("PRAGMA table_info(ignores)").all();
+      if (!ignoresColumns.some((col) => col.name === "container_id")) {
+        logger.info('Schema migration: Adding "container_id" column to "ignores" table');
+        
+        db.exec(`
+          CREATE TABLE ignores_new (
+            server_id TEXT NOT NULL,
+            host_ip TEXT NOT NULL,
+            host_port INTEGER NOT NULL,
+            container_id TEXT,
+            internal INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+            FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+          );
+          
+          INSERT INTO ignores_new (server_id, host_ip, host_port, container_id, internal)
+          SELECT server_id, host_ip, host_port, NULL as container_id, 0 as internal 
+          FROM ignores;
+          
+          DROP TABLE ignores;
+          ALTER TABLE ignores_new RENAME TO ignores;
+        `);
+        
+        logger.info('Schema migration: ignores table updated with container_id and internal support');
+      } else if (!ignoresColumns.some((col) => col.name === "internal")) {
+        logger.info('Schema migration: Adding "internal" column to "ignores" table');
+        
+        db.exec(`
+          CREATE TABLE ignores_new (
+            server_id TEXT NOT NULL,
+            host_ip TEXT NOT NULL,
+            host_port INTEGER NOT NULL,
+            container_id TEXT,
+            internal INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+            FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+          );
+          
+          INSERT INTO ignores_new (server_id, host_ip, host_port, container_id, internal)
+          SELECT server_id, host_ip, host_port, container_id, 0 as internal 
+          FROM ignores;
+          
+          DROP TABLE ignores;
+          ALTER TABLE ignores_new RENAME TO ignores;
+        `);
+        
+        logger.info('Schema migration: ignores table updated with internal support');
+      }
+    }
+
+    const notesTableInfo = db.prepare("PRAGMA table_info(notes)").all();
+    if (!notesTableInfo.some((col) => col.name === "container_id")) {
+      logger.info('Schema migration: Adding "container_id" column to "notes" table');
+      
+      db.exec(`
+        CREATE TABLE notes_new (
+          server_id     TEXT NOT NULL,
+          host_ip       TEXT NOT NULL,
+          host_port     INTEGER NOT NULL,
+          container_id  TEXT,
+          internal      INTEGER DEFAULT 0,
+          note          TEXT    NOT NULL,
+          created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at    DATETIME,
+          PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+        
+        INSERT INTO notes_new (server_id, host_ip, host_port, container_id, internal, note, created_at, updated_at)
+        SELECT server_id, host_ip, host_port, NULL as container_id, 0 as internal, note, created_at, updated_at 
+        FROM notes;
+        
+        DROP TABLE notes;
+        ALTER TABLE notes_new RENAME TO notes;
+      `);
+      
+      logger.info('Schema migration: notes table updated with container_id and internal support');
+    } else if (!notesTableInfo.some((col) => col.name === "internal")) {
+      logger.info('Schema migration: Adding "internal" column to "notes" table');
+      
+      db.exec(`
+        CREATE TABLE notes_new (
+          server_id     TEXT NOT NULL,
+          host_ip       TEXT NOT NULL,
+          host_port     INTEGER NOT NULL,
+          container_id  TEXT,
+          internal      INTEGER DEFAULT 0,
+          note          TEXT    NOT NULL,
+          created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at    DATETIME,
+          PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+        
+        INSERT INTO notes_new (server_id, host_ip, host_port, container_id, internal, note, created_at, updated_at)
+        SELECT server_id, host_ip, host_port, container_id, 0 as internal, note, created_at, updated_at 
+        FROM notes;
+        
+        DROP TABLE notes;
+        ALTER TABLE notes_new RENAME TO notes;
+      `);
+      
+      logger.info('Schema migration: notes table updated with internal support');
+    }
+
+    logger.info('Checking for protocol column migration...');
+    
+    const ignoresColumnsForProtocol = db.prepare("PRAGMA table_info(ignores)").all();
+    if (!ignoresColumnsForProtocol.some((col) => col.name === "protocol")) {
+      logger.info('Schema migration: Adding "protocol" column to "ignores" table');
+      
+      db.exec(`
+        CREATE TABLE ignores_new (
+          server_id TEXT NOT NULL,
+          host_ip TEXT NOT NULL,
+          host_port INTEGER NOT NULL,
+          protocol TEXT NOT NULL DEFAULT 'tcp',
+          container_id TEXT,
+          internal INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (server_id, host_ip, host_port, protocol, container_id, internal),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+        
+        INSERT INTO ignores_new (server_id, host_ip, host_port, protocol, container_id, internal, created_at)
+        SELECT server_id, host_ip, host_port, 'tcp' as protocol, container_id, internal, created_at 
+        FROM ignores;
+        
+        DROP TABLE ignores;
+        ALTER TABLE ignores_new RENAME TO ignores;
+      `);
+      
+      logger.info('Schema migration: ignores table updated with protocol support');
+    }
+
+    const notesColumnsForProtocol = db.prepare("PRAGMA table_info(notes)").all();
+    if (!notesColumnsForProtocol.some((col) => col.name === "protocol")) {
+      logger.info('Schema migration: Adding "protocol" column to "notes" table');
+      
+      db.exec(`
+        CREATE TABLE notes_new (
+          server_id     TEXT NOT NULL,
+          host_ip       TEXT NOT NULL,
+          host_port     INTEGER NOT NULL,
+          protocol      TEXT NOT NULL DEFAULT 'tcp',
+          container_id  TEXT,
+          internal      INTEGER DEFAULT 0,
+          note          TEXT    NOT NULL,
+          created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at    DATETIME,
+          PRIMARY KEY (server_id, host_ip, host_port, protocol, container_id, internal),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+        
+        INSERT INTO notes_new (server_id, host_ip, host_port, protocol, container_id, internal, note, created_at, updated_at)
+        SELECT server_id, host_ip, host_port, 'tcp' as protocol, container_id, internal, note, created_at, updated_at 
+        FROM notes;
+        
+        DROP TABLE notes;
+        ALTER TABLE notes_new RENAME TO notes;
+      `);
+      
+      logger.info('Schema migration: notes table updated with protocol support');
+    }
+
+    const customServiceNamesColumnsForProtocol = db.prepare("PRAGMA table_info(custom_service_names)").all();
+    if (!customServiceNamesColumnsForProtocol.some((col) => col.name === "protocol")) {
+      logger.info('Schema migration: Adding "protocol" column to "custom_service_names" table');
+      
+      db.exec(`
+        CREATE TABLE custom_service_names_new (
+          server_id TEXT NOT NULL,
+          host_ip TEXT NOT NULL,
+          host_port INTEGER NOT NULL,
+          protocol TEXT NOT NULL DEFAULT 'tcp',
+          container_id TEXT,
+          internal INTEGER DEFAULT 0,
+          custom_name TEXT NOT NULL,
+          original_name TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (server_id, host_ip, host_port, protocol, container_id, internal),
+          FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
+        );
+        
+        INSERT INTO custom_service_names_new (server_id, host_ip, host_port, protocol, container_id, internal, custom_name, original_name, created_at, updated_at)
+        SELECT server_id, host_ip, host_port, 'tcp' as protocol, container_id, internal, custom_name, original_name, created_at, updated_at 
+        FROM custom_service_names;
+        
+        DROP TABLE custom_service_names;
+        ALTER TABLE custom_service_names_new RENAME TO custom_service_names;
+      `);
+      
+      logger.info('Schema migration: custom_service_names table updated with protocol support');
+    }
+
   } catch (migrationError) {
     logger.error(
       "FATAL: Database schema migration failed:",

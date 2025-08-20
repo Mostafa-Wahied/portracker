@@ -1,5 +1,6 @@
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { PortTableRow } from "./PortTableRow";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 /**
  * Renders a sortable table displaying a list of ports with associated details and actions.
@@ -15,11 +16,16 @@ export function PortTable({
   onCopy,
   onNote,
   onToggleIgnore,
+  onRename,
   sortConfig,
   onSort,
   deepLinkContainerId,
   onOpenContainerDetails,
   onCloseContainerDetails,
+  selectionMode = false,
+  selectedPorts,
+  onToggleSelection,
+  onSelectAllPorts,
 }) {
   const getSortIcon = (column) => {
     if (sortConfig.key !== column) {
@@ -36,11 +42,48 @@ export function PortTable({
     onSort(column);
   };
 
+  const allSelected = ports.length > 0 && ports.every(port => 
+    selectedPorts?.has(generatePortKey(serverId, port))
+  );
+  
+  const someSelected = ports.some(port => 
+    selectedPorts?.has(generatePortKey(serverId, port))
+  );
+
+  const handleSelectAll = () => {
+    if (allSelected) {
+      ports.forEach(port => {
+        if (selectedPorts?.has(generatePortKey(serverId, port))) {
+          onToggleSelection?.(port, serverId);
+        }
+      });
+    } else {
+      onSelectAllPorts?.(ports);
+    }
+  };
+
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full">
         <thead className="bg-slate-50 dark:bg-slate-800/50">
           <tr>
+            {selectionMode && (
+              <th
+                scope="col"
+                className="px-4 py-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider"
+              >
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={input => {
+                    if (input) input.indeterminate = someSelected && !allSelected;
+                  }}
+                  onChange={handleSelectAll}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+                />
+              </th>
+            )}
+            
             <th
               scope="col"
               className="px-4 py-3 text-center text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider"
@@ -106,11 +149,7 @@ export function PortTable({
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
           {ports.map((port) => (
             <PortTableRow
-              key={
-                port.internal
-                  ? `${serverId}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                  : `${serverId}-${port.host_ip}-${port.host_port}`
-              }
+              key={generatePortKey(serverId, port)}
               port={port}
               serverId={serverId}
               serverUrl={serverUrl}
@@ -119,9 +158,13 @@ export function PortTable({
               onCopy={onCopy}
               onNote={onNote}
               onToggleIgnore={onToggleIgnore}
+              onRename={onRename}
               forceOpenDetails={deepLinkContainerId && port.container_id === deepLinkContainerId}
               notifyOpenDetails={(cid) => onOpenContainerDetails && onOpenContainerDetails(cid)}
               notifyCloseDetails={() => onCloseContainerDetails && onCloseContainerDetails()}
+              selectionMode={selectionMode}
+              isSelected={selectedPorts?.has(generatePortKey(serverId, port))}
+              onToggleSelection={onToggleSelection}
             />
           ))}
         </tbody>

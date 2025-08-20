@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink, Lock } from "lucide-react";
+import { ExternalLink, Lock, Tag } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { ActionButton } from "./ActionButton";
 import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
@@ -15,6 +16,7 @@ import {
   getSearchMatches,
   highlightText,
 } from "@/lib/utils";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 const renderHighlightedText = (content) => {
   if (typeof content === "string") return content;
@@ -34,6 +36,10 @@ const renderHighlightedText = (content) => {
   );
 };
 
+const getDisplayServiceName = (port) => {
+  return port.customServiceName || port.owner || "Unknown Service";
+};
+
 /**
  * Displays detailed information and interactive actions for a network port, with optional search term highlighting.
  *
@@ -48,9 +54,13 @@ export function PortGridItem({
   onCopy,
   onNote,
   onToggleIgnore,
+  onRename,
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelection,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -80,10 +90,23 @@ export function PortGridItem({
   return (
     <div
       tabIndex="0"
-      className="group relative border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 min-h-[120px] flex flex-col justify-between bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+      className={`group relative border border-slate-200 dark:border-slate-700 rounded-lg p-4 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 min-h-[120px] flex flex-col justify-between bg-white dark:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+        isSelected ? 'border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 shadow-md' : ''
+      }`}
     >
+      {selectionMode && (
+        <div className="absolute top-2 left-2 z-10">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.(port, serverId)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+          />
+        </div>
+      )}
+    
         <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center space-x-2 min-w-0 flex-1">
+        <div className={`flex items-center space-x-2 min-w-0 flex-1 ${selectionMode ? 'ml-6' : ''}`}>
           <PortStatusIndicator
             serverId={serverId}
             serverUrl={serverUrl}
@@ -148,14 +171,10 @@ export function PortGridItem({
           </div>
         </div>
         
-        <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ml-2">
+        <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity ml-2">
           <PortActions
             port={port}
-            itemKey={
-              port.internal
-                ? `${serverId}-${port.container_id || port.app_id}-${port.host_port}-internal`
-                : `${serverId}-${port.host_ip}-${port.host_port}`
-            }
+            itemKey={generatePortKey(serverId, port)}
             actionFeedback={actionFeedback}
             onCopy={() => onCopy(port, protocol)}
             onEdit={() => onNote(serverId, port)}
@@ -178,33 +197,46 @@ export function PortGridItem({
 
       <div className="mb-2 flex-1">
         <h4 className="font-semibold text-sm text-slate-900 dark:text-slate-100 break-words leading-tight">
-          {canShowDetails ? (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowDetails(true);
-                      if (notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
-                    }}
-                    className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-                  >
-                    {shouldHighlight
-                      ? renderHighlightedText(highlightText(port.owner, searchTerm))
-                      : port.owner}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Open container details</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          ) : (
-            <span className="truncate inline-flex items-center">
-              {shouldHighlight
-                ? renderHighlightedText(highlightText(port.owner, searchTerm))
-                : port.owner}
-            </span>
-          )}
+          <div className="flex items-center space-x-1">
+            {canShowDetails ? (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowDetails(true);
+                        if (notifyOpenDetails && port.container_id) notifyOpenDetails(port.container_id);
+                      }}
+                      className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+                    >
+                      {shouldHighlight
+                        ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
+                        : getDisplayServiceName(port)}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Open container details</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
+              <span className="truncate inline-flex items-center">
+                {shouldHighlight
+                  ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
+                  : getDisplayServiceName(port)}
+              </span>
+            )}
+            <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+              <ActionButton
+                type="rename"
+                itemKey={generatePortKey(serverId, port)}
+                actionFeedback={actionFeedback}
+                onClick={() => onRename(serverId, port)}
+                icon={Tag}
+                title="Rename service"
+                size="sm"
+              />
+            </div>
+          </div>
         </h4>
         {port.note && (
           <TooltipProvider>

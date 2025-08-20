@@ -2,6 +2,16 @@
 
 All notable changes to Portracker will be documented in this file.
 
+## [1.0.7] - 2025-08-19
+
+### Frontend
+- **Service renaming**: Allow renaming services from the UI.
+- **Batch actions**: Add selection and batch operations for services and ports (ignore, add note, etc.).
+- **Internal / Port display fixes**: Fix display issues so internal and published ports are shown correctly; fix select-box overlap.
+
+### Backend
+- **Port protocol reporting**: Ensure ports include protocol information so reported mappings are accurate.
+
 ## [1.0.6] - 2025-08-15
 
 ### Frontend

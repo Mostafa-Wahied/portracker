@@ -43,8 +43,9 @@ export function ActionButton({
         <TooltipTrigger asChild>
           <button
             onClick={onClick}
-            className={`${baseClasses} ${colorClasses} ${sizeClasses[size]}`}
+            className={`${baseClasses} ${colorClasses} ${sizeClasses[size]} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
             disabled={wasClicked || isLoading}
+            tabIndex={0}
           >
             <span
               className={

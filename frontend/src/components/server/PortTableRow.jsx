@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ExternalLink, Lock } from "lucide-react";
+import { ExternalLink, Lock, Tag } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/tooltip";
 import { PortStatusIndicator } from "./PortStatusIndicator";
 import { PortActions } from "./PortActions";
+import { ActionButton } from "./ActionButton";
 import { InternalPortDetails } from "./InternalPortDetails";
 import {
   formatCreatedDate,
@@ -15,6 +16,7 @@ import {
   getSearchMatches,
   highlightText,
 } from "@/lib/utils";
+import { generatePortKey } from "../../lib/utils/portUtils";
 
 const renderHighlightedText = (content) => {
   if (typeof content === "string") return content;
@@ -34,6 +36,10 @@ const renderHighlightedText = (content) => {
   );
 };
 
+const getDisplayServiceName = (port) => {
+  return port.customServiceName || port.owner || "Unknown Service";
+};
+
 function PortTableRowComponent({
   port,
   serverId,
@@ -43,9 +49,13 @@ function PortTableRowComponent({
   onCopy,
   onNote,
   onToggleIgnore,
+  onRename,
   forceOpenDetails,
   notifyOpenDetails,
   notifyCloseDetails,
+  selectionMode = false,
+  isSelected = false,
+  onToggleSelection,
 }) {
   const [protocol, setProtocol] = useState("http");
   const [showDetails, setShowDetails] = useState(false);
@@ -71,13 +81,25 @@ function PortTableRowComponent({
     hostForUi = port.host_ip;
   }
 
-  const itemKey = `${serverId}-${port.host_ip}-${port.host_port}`;
+  const itemKey = generatePortKey(serverId, port);
 
   return (
     <tr
       tabIndex="0"
-      className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50"
+      className={`group hover:bg-slate-50 dark:hover:bg-slate-800/50 focus:outline-none focus:bg-slate-50 dark:focus:bg-slate-800/50 ${
+        isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500' : ''
+      }`}
     >
+      {selectionMode && (
+        <td className="px-4 py-3 text-center">
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.(port, serverId)}
+            className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-slate-600 rounded cursor-pointer"
+          />
+        </td>
+      )}
       
       <td className="px-4 py-3 text-center">
         <div className="flex justify-center">
@@ -167,28 +189,54 @@ function PortTableRowComponent({
       <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">
         <div className="flex flex-col space-y-1">
           {canShowDetails ? (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={() => setShowDetails(true)}
-                    className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
-                  >
-                    {shouldHighlight
-                      ? renderHighlightedText(highlightText(port.owner, searchTerm))
-                      : port.owner}
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Open container details</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+            <div className="flex items-center space-x-1">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={() => setShowDetails(true)}
+                      className="inline-flex items-center w-fit whitespace-nowrap cursor-pointer rounded-md px-1.5 py-0.5 transition-colors hover:bg-slate-100/70 dark:hover:bg-slate-800/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+                    >
+                      {shouldHighlight
+                        ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
+                        : getDisplayServiceName(port)}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>Open container details</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                <ActionButton
+                  type="rename"
+                  itemKey={itemKey}
+                  actionFeedback={actionFeedback}
+                  onClick={() => onRename(serverId, port)}
+                  icon={Tag}
+                  title="Rename service"
+                  size="sm"
+                />
+              </div>
+            </div>
           ) : (
-            <span className="truncate inline-flex items-center">
-              {shouldHighlight
-                ? renderHighlightedText(highlightText(port.owner, searchTerm))
-                : port.owner}
-            </span>
+            <div className="flex items-center space-x-1">
+              <span className="truncate inline-flex items-center">
+                {shouldHighlight
+                  ? renderHighlightedText(highlightText(getDisplayServiceName(port), searchTerm))
+                  : getDisplayServiceName(port)}
+              </span>
+              <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+                <ActionButton
+                  type="rename"
+                  itemKey={itemKey}
+                  actionFeedback={actionFeedback}
+                  onClick={() => onRename(serverId, port)}
+                  icon={Tag}
+                  title="Rename service"
+                  size="sm"
+                />
+              </div>
+            </div>
           )}
           {port.note && (
             <TooltipProvider>
@@ -247,7 +295,7 @@ function PortTableRowComponent({
 
       
       <td className="px-4 py-3 text-right">
-        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        <div className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 group-active:opacity-100 [@media(hover:none)]:group-active:opacity-100 [@media(hover:none)]:opacity-0 transition-opacity">
           <PortActions
             port={port}
             itemKey={itemKey}
