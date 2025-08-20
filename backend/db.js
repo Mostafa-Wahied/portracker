@@ -199,11 +199,12 @@ if (!tableExists) {
           host_ip TEXT NOT NULL,
           host_port INTEGER NOT NULL,
           container_id TEXT,
+          internal INTEGER DEFAULT 0,
           custom_name TEXT NOT NULL,
           original_name TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (server_id, host_ip, host_port, container_id),
+          PRIMARY KEY (server_id, host_ip, host_port, container_id, internal),
           FOREIGN KEY (server_id) REFERENCES servers(id) ON DELETE CASCADE
         );
       `);
