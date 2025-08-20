@@ -216,6 +216,8 @@ if (!tableExists) {
         db.exec(`
           ALTER TABLE custom_service_names ADD COLUMN container_id TEXT;
           
+          DROP TABLE IF EXISTS custom_service_names_new;
+          
           CREATE TABLE custom_service_names_new (
             server_id TEXT NOT NULL,
             host_ip TEXT NOT NULL,
@@ -243,6 +245,8 @@ if (!tableExists) {
         logger.info('Schema migration: Adding "internal" column to "custom_service_names" table');
         
         db.exec(`
+          DROP TABLE IF EXISTS custom_service_names_new;
+          
           CREATE TABLE custom_service_names_new (
             server_id TEXT NOT NULL,
             host_ip TEXT NOT NULL,
@@ -390,6 +394,8 @@ if (!tableExists) {
       logger.info('Schema migration: Adding "protocol" column to "ignores" table');
       
       db.exec(`
+        DROP TABLE IF EXISTS ignores_new;
+        
         CREATE TABLE ignores_new (
           server_id TEXT NOT NULL,
           host_ip TEXT NOT NULL,
@@ -418,6 +424,8 @@ if (!tableExists) {
       logger.info('Schema migration: Adding "protocol" column to "notes" table');
       
       db.exec(`
+        DROP TABLE IF EXISTS notes_new;
+        
         CREATE TABLE notes_new (
           server_id     TEXT NOT NULL,
           host_ip       TEXT NOT NULL,
@@ -448,6 +456,8 @@ if (!tableExists) {
       logger.info('Schema migration: Adding "protocol" column to "custom_service_names" table');
       
       db.exec(`
+        DROP TABLE IF EXISTS custom_service_names_new;
+        
         CREATE TABLE custom_service_names_new (
           server_id TEXT NOT NULL,
           host_ip TEXT NOT NULL,
