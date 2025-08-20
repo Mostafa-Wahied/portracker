@@ -2,6 +2,14 @@
 
 All notable changes to Portracker will be documented in this file.
 
+## [1.0.8] - 2025-08-20
+
+### Frontend
+- **Batch rename migration fix**: Fix migration issue affecting batch rename operations so renamed services persist correctly.
+
+### Dev
+- **Misc**: minor migration-related fix for batch rename flow.
+
 ## [1.0.7] - 2025-08-19
 
 ### Frontend
