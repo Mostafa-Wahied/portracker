@@ -2,6 +2,12 @@
 
 All notable changes to Portracker will be documented in this file.
 
+## [1.1.0] - 2025-08-23
+
+### Frontend & Backend
+- **System Port Name Fix**: Fixed the issue where system ports were incorrectly displayed as "unknown".
+- **Consistent Status Indicators**: Improved status indicators for system ports to ensure consistency.
+
 ## [1.0.8] - 2025-08-20
 
 ### Frontend
