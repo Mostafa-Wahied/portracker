@@ -222,7 +222,7 @@ function detectHostAddresses() {
         }
       }
     } catch {
-      ;
+      void 0;
     }
     
     hostAddresses.push("host.docker.internal");

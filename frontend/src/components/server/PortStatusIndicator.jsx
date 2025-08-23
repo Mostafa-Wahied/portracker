@@ -36,6 +36,10 @@ export function PortStatusIndicator({
     if (port.owner) {
       pingApiUrl += `&owner=${encodeURIComponent(port.owner)}`;
     }
+    
+    if (port.source) {
+      pingApiUrl += `&source=${encodeURIComponent(port.source)}`;
+    }
 
     if (
       serverId &&
@@ -71,7 +75,7 @@ export function PortStatusIndicator({
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [port.host_ip, port.host_port, port.owner, port.internal, port.container_id, serverId, serverUrl, onProtocolChange]);
+  }, [port.host_ip, port.host_port, port.owner, port.internal, port.container_id, port.source, serverId, serverUrl, onProtocolChange]);
 
   const getDotState = () => {
     if (checking) {

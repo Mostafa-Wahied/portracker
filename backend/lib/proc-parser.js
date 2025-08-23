@@ -9,16 +9,26 @@ class ProcParser {
     this.logger = new Logger("ProcParser", { debug: process.env.DEBUG === 'true' });
     
     const hostProcPath = process.env.HOST_PROC;
-    
+    if (hostProcPath) {
+      try {
+        require('fs').statSync(path.join(hostProcPath, 'net', 'tcp'));
+        this.procPath = hostProcPath;
+        this.logger.debug(`Using /proc path from HOST_PROC: ${this.procPath}`);
+      } catch (e) {
+        this.logger.warn(`HOST_PROC provided but unusable (${hostProcPath}): ${e.message}`);
+        this.procPath = procPath;
+      }
+    }
+
     const procPaths = [
-      procPath,
-      '/proc',
       hostProcPath,
       '/host/proc',
       '/hostproc',
+      procPath,
+      '/proc',
     ].filter(Boolean);
     
-    this.procPath = procPath;
+    this.procPath = this.procPath || procPath;
     for (const testPath of procPaths) {
       try {
         require('fs').statSync(path.join(testPath, 'net', 'tcp'));
@@ -26,7 +36,7 @@ class ProcParser {
         this.logger.debug(`Using /proc path: ${this.procPath}`);
         break;
   } catch {
-      ;
+      void 0;
       }
     }
     
@@ -85,7 +95,10 @@ class ProcParser {
 
   /** Parse /proc/net/tcp and /proc/net/tcp6 */
   async getTcpPorts() {
-    const ports = [];
+  const ports = [];
+  const prelim = [];
+  const inodeMap = await this._buildInodeMap();
+  let resolvedOwners = 0;
     
     for (const file of ['tcp', 'tcp6']) {
       try {
@@ -109,19 +122,53 @@ class ProcParser {
           if (port === 0 || port > 65535) continue;
 
           const ip = this._parseHexAddress(addrHex);
-          const processInfo = await this._findProcessByInode(parseInt(inode, 10));
+          const inodeNum = parseInt(inode, 10);
+          const processInfo = inodeMap.get(inodeNum);
+          if (processInfo && processInfo.name) resolvedOwners++;
 
-          ports.push({
+          const entry = {
             protocol: 'tcp',
             host_ip: ip,
             host_port: port,
-            inode: parseInt(inode, 10),
+            inode: inodeNum,
             pid: processInfo?.pid,
             owner: processInfo?.name || 'unknown'
-          });
+          };
+          ports.push(entry);
+          prelim.push({ inode: inodeNum });
         }
       } catch (err) {
         this.logger.warn(`Warning reading network file ${file}:`, err.message);
+      }
+    }
+    this.logger.debug(`TCP parse complete: ports=${ports.length}, ownersResolved=${resolvedOwners}, inodeMapSize=${inodeMap.size}`);
+
+    const needFallback = ports.length > 0 && resolvedOwners < Math.floor(ports.length * 0.5);
+    if (needFallback) {
+      const targetInodes = new Set(prelim.map(p => p.inode));
+      const fallbackMap = await this._buildInodeMapForInodes(targetInodes);
+      let addResolved = 0;
+      for (const p of ports) {
+        if (!p.owner || p.owner === 'unknown') {
+          const info = fallbackMap.get(p.inode);
+          if (info) {
+            p.owner = info.name;
+            p.pid = info.pid;
+            addResolved++;
+          }
+        }
+      }
+      this.logger.debug(`TCP targeted fd-scan fallback resolved additional=${addResolved}`);
+      if ((resolvedOwners + addResolved) < Math.floor(ports.length * 0.5)) {
+        if (this.isContainerized) {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: On Docker Desktop (macOS/Windows), enable cap_add: [SYS_ADMIN] to allow namespace tools (nsenter) in collectors; on Linux hosts, ensure cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined] with /proc:/host/proc:ro.'
+          );
+        } else {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: Grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined], and mount /proc from the host if running in a container (e.g., /proc:/host/proc:ro).'
+          );
+        }
       }
     }
     
@@ -130,7 +177,10 @@ class ProcParser {
 
   /** Parse /proc/net/udp and /proc/net/udp6 with proper filtering */
   async getUdpPorts(includeAll = false) {
-    const ports = [];
+  const ports = [];
+  const prelim = [];
+  const inodeMap = await this._buildInodeMap();
+  let resolvedOwners = 0;
     
     for (const file of ['udp', 'udp6']) {
       try {
@@ -155,19 +205,53 @@ class ProcParser {
           }
 
           const ip = this._parseHexAddress(addrHex);
-          const processInfo = await this._findProcessByInode(parseInt(inode, 10));
+          const inodeNum = parseInt(inode, 10);
+          const processInfo = inodeMap.get(inodeNum);
+          if (processInfo && processInfo.name) resolvedOwners++;
 
-          ports.push({
+          const entry = {
             protocol: 'udp',
             host_ip: ip,
             host_port: port,
-            inode: parseInt(inode, 10),
+            inode: inodeNum,
             pid: processInfo?.pid,
             owner: processInfo?.name || 'unknown'
-          });
+          };
+          ports.push(entry);
+          prelim.push({ inode: inodeNum });
         }
       } catch (err) {
         this.logger.warn(`Warning reading network file ${file}:`, err.message);
+      }
+    }
+    this.logger.debug(`UDP parse complete: ports=${ports.length}, ownersResolved=${resolvedOwners}, inodeMapSize=${inodeMap.size}`);
+
+    const needFallback = ports.length > 0 && resolvedOwners < Math.floor(ports.length * 0.5);
+    if (needFallback) {
+      const targetInodes = new Set(prelim.map(p => p.inode));
+      const fallbackMap = await this._buildInodeMapForInodes(targetInodes);
+      let addResolved = 0;
+      for (const p of ports) {
+        if (!p.owner || p.owner === 'unknown') {
+          const info = fallbackMap.get(p.inode);
+          if (info) {
+            p.owner = info.name;
+            p.pid = info.pid;
+            addResolved++;
+          }
+        }
+      }
+      this.logger.debug(`UDP targeted fd-scan fallback resolved additional=${addResolved}`);
+      if ((resolvedOwners + addResolved) < Math.floor(ports.length * 0.5)) {
+        if (this.isContainerized) {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: On Docker Desktop (macOS/Windows), enable cap_add: [SYS_ADMIN] to allow namespace tools (nsenter) in collectors; on Linux hosts, ensure cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined] with /proc:/host/proc:ro.'
+          );
+        } else {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: Grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined], and mount /proc from the host if running in a container (e.g., /proc:/host/proc:ro).'
+          );
+        }
       }
     }
     
@@ -209,6 +293,15 @@ class ProcParser {
         }
       } catch (err) {
         this.logger.warn(`Cannot read process information: ${err.message}`);
+        if (this.isContainerized) {
+          this.logger.warn(
+            'Hint: Grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined]; mount host /proc as read-only (e.g., /proc:/host/proc:ro) and set HOST_PROC. On Docker Desktop, system-wide ownership mapping may require cap_add: [SYS_ADMIN] for namespace access.'
+          );
+        } else {
+          this.logger.warn(
+            'Hint: On Linux hosts, grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined] when running in a container to read other processes\' info.'
+          );
+        }
       }
       
       return listeningPorts >= 1 || canReadProcesses;
@@ -235,49 +328,151 @@ class ProcParser {
     return '0.0.0.0';
   }
 
-  /** Find process by socket inode */
-  async _findProcessByInode(inode) {
-    if (this.isContainerized) {
-      return null;
+  
+
+  /**
+   * Build a cached map of socket inode -> { pid, name }
+   * - Caches for a short duration to avoid repeated /proc scans
+   * - Uses /proc/[pid]/comm for clean process name; falls back to cmdline
+   */
+  async _buildInodeMap() {
+    const now = Date.now();
+  const ttlMs = 2000;
+    if (this._inodeMap && this._inodeMapTs && now - this._inodeMapTs < ttlMs) {
+      return this._inodeMap;
     }
-    
-    try {
-      const dirs = await fs.readdir(this.procPath);
-      
-      for (const dir of dirs) {
+
+    const map = new Map();
+    const roots = Array.from(new Set([
+      this.procPath,
+      '/host/proc',
+      '/proc',
+    ]));
+
+    let totalPids = 0;
+    for (const root of roots) {
+      let pids;
+      try {
+        pids = await fs.readdir(root);
+      } catch {
+        continue;
+      }
+
+      totalPids += pids.filter(p => /^\d+$/.test(p)).length;
+
+      for (const dir of pids) {
         if (!/^\d+$/.test(dir)) continue;
-        
         const pid = parseInt(dir, 10);
-        const fdPath = path.join(this.procPath, dir, 'fd');
-        
+        const fdPath = path.join(root, dir, 'fd');
+
+        let procName = 'unknown';
+        try {
+          const comm = await fs.readFile(path.join(root, dir, 'comm'), 'utf8');
+          procName = comm.trim() || 'unknown';
+        } catch {
+          try {
+            const cmdline = await fs.readFile(path.join(root, dir, 'cmdline'), 'utf8');
+            const first = (cmdline.split('\0')[0] || '').trim();
+            if (first) {
+              procName = first.split('/').pop();
+            }
+          } catch {
+            void 0;
+          }
+        }
+
         try {
           const fds = await fs.readdir(fdPath);
-          
           for (const fd of fds) {
             try {
               const link = await fs.readlink(path.join(fdPath, fd));
-              if (link === `socket:[${inode}]`) {
-                const cmdline = await fs.readFile(
-                  path.join(this.procPath, dir, 'cmdline'), 
-                  'utf8'
-                );
-                const name = cmdline.split('\0')[0].split('/').pop() || 'unknown';
-                
-                return { pid, name };
+              const m = link.match(/^socket:\[(\d+)\]$/);
+              if (m) {
+                const inode = parseInt(m[1], 10);
+                if (!Number.isNaN(inode)) {
+                  if (!map.has(inode)) map.set(inode, { pid, name: procName });
+                }
               }
             } catch {
-              ;
+              void 0;
             }
           }
         } catch {
-          ;
+          void 0;
         }
       }
-    } catch (err) {
-      this.logger.warn(`Error reading process info: ${err.message}`);
     }
-    
-    return null;
+
+    this._inodeMap = map;
+    this._inodeMapTs = now;
+    this.logger.debug(`Built inode map: entries=${map.size}, totalPidsSeen=${totalPids}, roots=${roots.join(',')}`);
+    return map;
+  }
+
+  async _buildInodeMapForInodes(targetInodes) {
+    const map = new Map();
+    if (!targetInodes || targetInodes.size === 0) return map;
+    const roots = Array.from(new Set([
+      this.procPath,
+      '/host/proc',
+      '/proc',
+    ]));
+    let matched = 0;
+    let pidsSeen = 0;
+    let fdsChecked = 0;
+    for (const root of roots) {
+      let pids;
+      try {
+        pids = await fs.readdir(root);
+      } catch {
+        continue;
+      }
+      for (const dir of pids) {
+        if (!/^\d+$/.test(dir)) continue;
+        pidsSeen++;
+        const pid = parseInt(dir, 10);
+        const fdPath = path.join(root, dir, 'fd');
+        let procName = 'unknown';
+        try {
+          const comm = await fs.readFile(path.join(root, dir, 'comm'), 'utf8');
+          procName = comm.trim() || 'unknown';
+        } catch {
+          try {
+            const cmdline = await fs.readFile(path.join(root, dir, 'cmdline'), 'utf8');
+            const first = (cmdline.split('\0')[0] || '').trim();
+            if (first) procName = first.split('/').pop();
+          } catch {
+            void 0;
+          }
+        }
+        try {
+          const fds = await fs.readdir(fdPath);
+          for (const fd of fds) {
+            fdsChecked++;
+            try {
+              const link = await fs.readlink(path.join(fdPath, fd));
+              const m = link.match(/^socket:\[(\d+)\]$/);
+              if (m) {
+                const inode = parseInt(m[1], 10);
+                if (targetInodes.has(inode) && !map.has(inode)) {
+                  map.set(inode, { pid, name: procName });
+                  matched++;
+                  if (matched >= targetInodes.size) break;
+                }
+              }
+            } catch {
+              void 0;
+            }
+          }
+        } catch {
+          void 0;
+        }
+        if (matched >= targetInodes.size) break;
+      }
+      if (matched >= targetInodes.size) break;
+    }
+    this.logger.debug(`Built targeted fd inode map: matched=${matched}/${targetInodes.size}, pidsSeen=${pidsSeen}, fdsChecked=${fdsChecked}`);
+    return map;
   }
 
   /** Check if a process belongs to a Docker container */
@@ -291,7 +486,7 @@ class ProcParser {
   return match[1].substring(0, 12);
       }
     } catch {
-      ;
+      void 0;
     }
     
     return null;

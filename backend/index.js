@@ -1965,7 +1965,7 @@ app.post("/api/notes/batch", (req, res) => {
 });
 
 app.get("/api/ping", async (req, res) => {
-  const { host_ip, host_port, target_server_url, owner, internal, container_id } = req.query;
+  const { host_ip, host_port, target_server_url, owner, internal, container_id, source } = req.query;
   const serverId = req.query.server_id;
   const currentDebug = req.query.debug === "true";
   
@@ -1997,6 +1997,7 @@ app.get("/api/ping", async (req, res) => {
         if (host_ip) params.set('host_ip', host_ip);
         if (host_port) params.set('host_port', host_port);
         if (owner) params.set('owner', owner);
+        if (source) params.set('source', source);
         if (currentDebug) params.set('debug', 'true');
         const url = `${base}/api/ping?${params.toString()}`;
         const resp = await fetch(url, { headers: { 'accept': 'application/json' } });
@@ -2054,14 +2055,14 @@ app.get("/api/ping", async (req, res) => {
     });
   }
   
-  if (serviceInfo.type === 'system') {
+  if (serviceInfo.type === 'system' || source === 'system') {
     return res.json({
       reachable: true,
       status: 'system',
       color: 'gray',
-      title: serviceInfo.description,
-      serviceType: serviceInfo.type,
-      serviceName: serviceInfo.name
+      title: source === 'system' ? 'System service' : serviceInfo.description,
+      serviceType: 'system',
+      serviceName: source === 'system' ? 'System Service' : serviceInfo.name
     });
   }
 

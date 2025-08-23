@@ -51,7 +51,13 @@ services:
     image: mostafawahied/portracker:latest
     container_name: portracker
     restart: unless-stopped
-    pid: "host"  # Required for comprehensive port detection
+    pid: "host"  # Required for port detection
+    # Required permissions for system ports service namespace access
+    cap_add:
+      - SYS_PTRACE     # Linux hosts: read other PIDs' /proc entries
+      - SYS_ADMIN      # Docker Desktop: allow namespace access for host ports (required for MacOS)
+    security_opt:
+      - apparmor:unconfined # Required for system ports
     volumes:
       # Required for data persistence
       - ./portracker-data:/data
@@ -59,9 +65,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       - "4999:4999"
-    environment:
-      - DATABASE_PATH=/data/portracker.db
-      - PORT=4999
+    # environment:
       # Optional: For enhanced TrueNAS features
       # - TRUENAS_API_KEY=your-api-key-here
 ```
@@ -79,11 +83,12 @@ docker run -d \
   --name portracker \
   --restart unless-stopped \
   --pid host \
+  --cap-add SYS_PTRACE \
+  --cap-add SYS_ADMIN \
+  --security-opt apparmor=unconfined \
   -p 4999:4999 \
   -v ./portracker-data:/data \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -e DATABASE_PATH=/data/portracker.db \
-  -e PORT=4999 \
   mostafawahied/portracker:latest
 ```
 
@@ -115,13 +120,16 @@ services:
     container_name: portracker
     restart: unless-stopped
     pid: "host"
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     volumes:
       - ./portracker-data:/data
     ports:
       - "4999:4999"
     environment:
-      - DATABASE_PATH=/data/portracker.db
-      - PORT=4999
       - DOCKER_HOST=tcp://docker-proxy:2375
     depends_on:
       - docker-proxy
@@ -148,10 +156,11 @@ docker run -d \
   --name portracker \
   --restart unless-stopped \
   --pid host \
+  --cap-add SYS_PTRACE \
+  --cap-add SYS_ADMIN \
+  --security-opt apparmor=unconfined \
   -p 4999:4999 \
   -v ./portracker-data:/data \
-  -e DATABASE_PATH=/data/portracker.db \
-  -e PORT=4999 \
   -e DOCKER_HOST=tcp://localhost:2375 \
   mostafawahied/portracker:latest
 ```

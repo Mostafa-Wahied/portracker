@@ -647,6 +647,10 @@ class TrueNASCollector extends BaseCollector {
       }
     } catch (nsenterErr) {
       this.logWarn(`nsenter method failed: ${nsenterErr.message}`);
+      const msg = String(nsenterErr?.message || '').toLowerCase();
+      if (msg.includes('permission denied') || msg.includes('operation not permitted') || msg.includes('exit code 1')) {
+        this.logWarn('Hint: nsenter requires cap_add: [SYS_ADMIN] to access the host network namespace on Docker Desktop (macOS/Windows).');
+      }
     }
 
     this.logError('All port collection methods failed');

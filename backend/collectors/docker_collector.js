@@ -605,6 +605,10 @@ class DockerCollector extends BaseCollector {
       return ports;
     } catch (nsenterErr) {
       this.logInfo(`nsenter method failed: ${nsenterErr.message}, trying alternative methods`);
+      const msg = String(nsenterErr?.message || '').toLowerCase();
+      if (msg.includes('permission denied') || msg.includes('operation not permitted') || msg.includes('exit code 1')) {
+        this.logWarn('Hint: nsenter requires cap_add: [SYS_ADMIN] to access the host network namespace on Docker Desktop (macOS/Windows).');
+      }
       
       try {
         const { stdout: netNsCheck } = await execAsync("readlink /proc/self/ns/net 2>/dev/null");
