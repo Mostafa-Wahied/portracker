@@ -36,7 +36,7 @@ class ProcParser {
         this.logger.debug(`Using /proc path: ${this.procPath}`);
         break;
   } catch {
-      ;
+      void 0;
       }
     }
     
@@ -486,7 +486,7 @@ class ProcParser {
   return match[1].substring(0, 12);
       }
     } catch {
-      ;
+      void 0;
     }
     
     return null;
