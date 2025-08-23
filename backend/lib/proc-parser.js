@@ -3,9 +3,6 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { Logger } = require('./logger');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const execAsync = promisify(exec);
 
 class ProcParser {
   constructor(procPath = '/proc') {
@@ -162,21 +159,16 @@ class ProcParser {
         }
       }
       this.logger.debug(`TCP targeted fd-scan fallback resolved additional=${addResolved}`);
-
-      if (addResolved < Math.ceil(ports.length * 0.25)) {
-        const ssMap = await this._buildInodeMapViaSS(targetInodes, ['tcp', 'tcp6']);
-        let ssResolved = 0;
-        for (const p of ports) {
-          if (!p.owner || p.owner === 'unknown') {
-            const info = ssMap.get(p.inode);
-            if (info) {
-              p.owner = info.name;
-              p.pid = info.pid;
-              ssResolved++;
-            }
-          }
+      if ((resolvedOwners + addResolved) < Math.floor(ports.length * 0.5)) {
+        if (this.isContainerized) {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: On Docker Desktop (macOS/Windows), enable cap_add: [SYS_ADMIN] to allow namespace tools (nsenter) in collectors; on Linux hosts, ensure cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined] with /proc:/host/proc:ro.'
+          );
+        } else {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: Grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined], and mount /proc from the host if running in a container (e.g., /proc:/host/proc:ro).'
+          );
         }
-        this.logger.debug(`TCP ss-based fallback resolved additional=${ssResolved}`);
       }
     }
     
@@ -250,21 +242,16 @@ class ProcParser {
         }
       }
       this.logger.debug(`UDP targeted fd-scan fallback resolved additional=${addResolved}`);
-
-      if (addResolved < Math.ceil(ports.length * 0.25)) {
-        const ssMap = await this._buildInodeMapViaSS(targetInodes, ['udp', 'udp6']);
-        let ssResolved = 0;
-        for (const p of ports) {
-          if (!p.owner || p.owner === 'unknown') {
-            const info = ssMap.get(p.inode);
-            if (info) {
-              p.owner = info.name;
-              p.pid = info.pid;
-              ssResolved++;
-            }
-          }
+      if ((resolvedOwners + addResolved) < Math.floor(ports.length * 0.5)) {
+        if (this.isContainerized) {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: On Docker Desktop (macOS/Windows), enable cap_add: [SYS_ADMIN] to allow namespace tools (nsenter) in collectors; on Linux hosts, ensure cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined] with /proc:/host/proc:ro.'
+          );
+        } else {
+          this.logger.warn(
+            'Low owner resolution via /proc. Hint: Grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined], and mount /proc from the host if running in a container (e.g., /proc:/host/proc:ro).'
+          );
         }
-        this.logger.debug(`UDP ss-based fallback resolved additional=${ssResolved}`);
       }
     }
     
@@ -306,6 +293,15 @@ class ProcParser {
         }
       } catch (err) {
         this.logger.warn(`Cannot read process information: ${err.message}`);
+        if (this.isContainerized) {
+          this.logger.warn(
+            'Hint: Grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined]; mount host /proc as read-only (e.g., /proc:/host/proc:ro) and set HOST_PROC. On Docker Desktop, system-wide ownership mapping may require cap_add: [SYS_ADMIN] for namespace access.'
+          );
+        } else {
+          this.logger.warn(
+            'Hint: On Linux hosts, grant cap_add: [SYS_PTRACE] and security_opt: [apparmor:unconfined] when running in a container to read other processes\' info.'
+          );
+        }
       }
       
       return listeningPorts >= 1 || canReadProcesses;
@@ -332,50 +328,7 @@ class ProcParser {
     return '0.0.0.0';
   }
 
-  /** Find process by socket inode */
-  async _findProcessByInode(inode) {
-    if (this.isContainerized) {
-      return null;
-    }
-    
-    try {
-      const dirs = await fs.readdir(this.procPath);
-      
-      for (const dir of dirs) {
-        if (!/^\d+$/.test(dir)) continue;
-        
-        const pid = parseInt(dir, 10);
-        const fdPath = path.join(this.procPath, dir, 'fd');
-        
-        try {
-          const fds = await fs.readdir(fdPath);
-          
-          for (const fd of fds) {
-            try {
-              const link = await fs.readlink(path.join(fdPath, fd));
-              if (link === `socket:[${inode}]`) {
-                const cmdline = await fs.readFile(
-                  path.join(this.procPath, dir, 'cmdline'), 
-                  'utf8'
-                );
-                const name = cmdline.split('\0')[0].split('/').pop() || 'unknown';
-                
-                return { pid, name };
-              }
-            } catch {
-              ;
-            }
-          }
-        } catch {
-          ;
-        }
-      }
-    } catch (err) {
-      this.logger.warn(`Error reading process info: ${err.message}`);
-    }
-    
-    return null;
-  }
+  
 
   /**
    * Build a cached map of socket inode -> { pid, name }
@@ -519,59 +472,6 @@ class ProcParser {
       if (matched >= targetInodes.size) break;
     }
     this.logger.debug(`Built targeted fd inode map: matched=${matched}/${targetInodes.size}, pidsSeen=${pidsSeen}, fdsChecked=${fdsChecked}`);
-    return map;
-  }
-
-  async _buildInodeMapViaSS(targetInodes, protocols) {
-    const map = new Map();
-    if (!targetInodes || targetInodes.size === 0) return map;
-    const cmds = [];
-    if (protocols.includes('tcp') || protocols.includes('tcp6')) {
-      cmds.push(['nsenter', ['-t', '1', '-n', 'ss', '-tinp']]);
-    }
-    if (protocols.includes('udp') || protocols.includes('udp6')) {
-      cmds.push(['nsenter', ['-t', '1', '-n', 'ss', '-uinp']]);
-    }
-    if (cmds.length === 0) return map;
-    let matched = 0;
-    for (const [cmd, args] of cmds) {
-      let stdout = '';
-      try {
-        const res = await execAsync(`${cmd} ${args.join(' ')}`);
-        stdout = res.stdout || '';
-    } catch {
-        try {
-      const alt = args.slice(3);
-          const res2 = await execAsync(`ss ${alt.join(' ')}`);
-          stdout = res2.stdout || '';
-        } catch {
-          continue;
-        }
-      }
-      const lines = stdout.split('\n');
-      for (const line of lines) {
-        if (!line) continue;
-        const inoMatch = line.match(/ino:(\d+)/);
-        if (!inoMatch) continue;
-        const inode = parseInt(inoMatch[1], 10);
-        if (!targetInodes.has(inode) || map.has(inode)) continue;
-  const usersMatch = line.match(/users:\(\(([^)]+)\)\)/);
-        let name = 'unknown';
-        let pid = undefined;
-        if (usersMatch) {
-          const segment = usersMatch[1];
-          const nameMatch = segment.match(/"([^"]+)"/);
-          if (nameMatch) name = nameMatch[1];
-          const pidMatch = segment.match(/pid=(\d+)/);
-          if (pidMatch) pid = parseInt(pidMatch[1], 10);
-        }
-        map.set(inode, { pid, name });
-        matched++;
-        if (matched >= targetInodes.size) break;
-      }
-      if (matched >= targetInodes.size) break;
-    }
-    this.logger.debug(`Built ss inode map: matched=${matched}/${targetInodes.size}`);
     return map;
   }
 

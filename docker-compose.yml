@@ -7,6 +7,16 @@ services:
     # Required for comprehensive system port detection
     # This allows Portracker to see all host processes for accurate port mapping
     pid: "host"
+
+    # Capabilities & security (universal, required)
+    # - SYS_PTRACE enables reading other processes' /proc entries on Linux hosts
+    # - SYS_ADMIN enables namespace entry on Docker Desktop (macOS/Windows)
+    # - apparmor:unconfined disables AppArmor restrictions that may block /proc access
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
     
     volumes:
       # Required: Data persistence for SQLite database
@@ -22,12 +32,14 @@ services:
       # - /sys/fs/cgroup:/host/sys/fs/cgroup:ro
     
     ports:
-      - "${HOST_PORT:-4999}:4999"
+      - "4999:4999"
     
     environment:
       # CORE CONFIGURATION (Required)
-      - DATABASE_PATH=/data/portracker.db
-      - PORT=4999
+      # - DATABASE_PATH=/data/portracker.db
+      # - PORT=4999
+      # Tell Portracker where to find the host /proc (matches the volume above)
+      # - HOST_PROC=/host/proc
       
       # DOCKER CONFIGURATION
       # Uncomment to use with docker-proxy for enhanced security
@@ -42,7 +54,7 @@ services:
       
       # PERFORMANCE SETTINGS (Optional)
       # Cache duration - increase for better performance, decrease for fresher data
-      - CACHE_TIMEOUT_MS=60000
+      # - CACHE_TIMEOUT_MS=60000
       # Disable caching entirely (not recommended for production)
       # - DISABLE_CACHE=true
       
@@ -61,6 +73,7 @@ services:
       timeout: 10s
       start_period: 30s
       retries: 3
+
 
   # OPTIONAL: Enhanced Security with Docker Socket Proxy
   # Uncomment the entire section below for additional Docker socket security
