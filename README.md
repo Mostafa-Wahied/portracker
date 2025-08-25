@@ -195,6 +195,10 @@ Future development is focused on improving the application based on community fe
 - Expanding the library of platform-specific collectors for other host systems.
 - Addressing bugs and incorporating requested changes from the community.
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=mostafa-wahied/portracker&type=Date)](https://www.star-history.com/#mostafa-wahied/portracker&Date)
+
 ## Contributing
 
 Contributions are welcome! Please feel free to open an issue to report a bug or suggest a feature, or submit a pull request with your improvements.
